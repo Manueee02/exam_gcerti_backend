@@ -165,7 +165,6 @@ class AuthController extends Controller
             'created_at' => $user->created_at,
             'updated_at' => $user->updated_at,
             'first_access' => $user->first_access,
-            'id_auditor' => $user->auditor ? $user->auditor->id : null,
 
 
         ];
@@ -176,7 +175,7 @@ class AuthController extends Controller
      */
     protected function respondWithToken($token, $refreshToken)
     {
-        $user = Auth::user()->load('role', 'auditor');
+        $user = Auth::user()->load('role');
 
         return response()->json([
             'access_token' => $token,
