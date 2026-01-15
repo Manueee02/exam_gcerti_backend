@@ -46,8 +46,7 @@ class DecisionMakerController extends Controller
             'name'    => 'required|string|max:255',
             'surname' => 'required|string|max:255',
             'email'   => 'required|email|unique:decisions_makers,email',
-            'id_user' => 'required|integer|exists:users,id',
-
+            'phone' => 'required|string|max:50',
             'media'               => 'required|array|min:1',
             'media.*.type'        => 'required|string|max:50',
             'media.*.id'          => 'required|integer|exists:media,id',
@@ -58,7 +57,7 @@ class DecisionMakerController extends Controller
 
         if (!$hasIdentityDocument) {
             return response()->json([
-                'message' => 'Identity document is required'
+                'message' => 'Il documento d\'identità è obbligatorio'
             ], 422);
         }
 
@@ -70,8 +69,7 @@ class DecisionMakerController extends Controller
                 'name'    => $validated['name'],
                 'surname' => $validated['surname'],
                 'email'   => $validated['email'],
-                'phone'   => $validated['phone'] ?? null,
-                'id_user' => $validated['id_user'],
+                'phone'   => $validated['phone'],
                 'active'  => true,
             ]);
 

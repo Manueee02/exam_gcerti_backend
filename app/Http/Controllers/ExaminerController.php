@@ -43,11 +43,10 @@ class ExaminerController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'name'    => 'required|string|max:255',
-            'surname' => 'required|string|max:255',
+            'name'    => 'required|string|max:100',
+            'surname' => 'required|string|max:100',
             'email'   => 'required|email|unique:examiners,email',
-            'id_user' => 'required|integer|exists:users,id',
-
+            'phone' => 'required|string|max:50',
             'media'               => 'required|array|min:1',
             'media.*.type'        => 'required|string|max:50',
             'media.*.id'          => 'required|integer|exists:media,id',
@@ -70,8 +69,7 @@ class ExaminerController extends Controller
                 'name'    => $validated['name'],
                 'surname' => $validated['surname'],
                 'email'   => $validated['email'],
-                'phone'   => $validated['phone'] ?? null,
-                'id_user' => $validated['id_user'],
+                'phone'   => $validated['phone'],
                 'active'  => 'true',
             ]);
 
@@ -105,8 +103,6 @@ class ExaminerController extends Controller
             'surname' => 'sometimes|string|max:255',
             'email'   => 'sometimes|email|unique:examiners,email,' . $examiner->id,
             'phone'   => 'nullable|string|max:50',
-            'id_user' => 'sometimes|integer|exists:users,id',
-
             'media'        => 'sometimes|array|min:1',
             'media.*.type' => 'required_with:media|string|max:50',
             'media.*.id'   => 'required_with:media|integer|exists:media,id',

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\UserRole;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -25,7 +26,10 @@ class CheckRole
             ], Response::HTTP_UNAUTHORIZED);
         }
 
-        if (!in_array($user->role, $roles)) {
+        $role = UserRole::find($user->id_role);
+
+
+        if (!$role || !in_array($role->name, $roles)) {
             return response()->json([
                 'message' => 'Unauthorized: insufficient role'
             ], Response::HTTP_FORBIDDEN);
