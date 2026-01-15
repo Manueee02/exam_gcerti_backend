@@ -2,6 +2,8 @@
 
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DecisionMakerController;
+use App\Http\Controllers\ExaminerController;
 use App\Http\Controllers\MediaController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UtilsController;
@@ -74,6 +76,32 @@ Route::middleware('auth:api')->group(function () {
         Route::get('download/{id}', [MediaController::class, 'show']);
         Route::delete('delete/{id}', [MediaController::class, 'destroy']);
     });
+
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('examiners')
+        ->group(function () {
+
+            Route::get('/', [ExaminerController::class, 'index']);
+            Route::get('/{id}', [ExaminerController::class, 'show']);
+            Route::post('/', [ExaminerController::class, 'store']);
+            Route::put('/{id}', [ExaminerController::class, 'update']);
+            Route::delete('/{id}', [ExaminerController::class, 'destroy']);
+
+        }
+    );
+
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('decision-makers')
+        ->group(function () {
+
+            Route::get('/', [DecisionMakerController::class, 'index']);
+            Route::get('/{id}', [DecisionMakerController::class, 'show']);
+            Route::post('/', [DecisionMakerController::class, 'store']);
+            Route::put('/{id}', [DecisionMakerController::class, 'update']);
+            Route::delete('/{id}', [DecisionMakerController::class, 'destroy']);
+
+        }
+        );
 });
 
 
