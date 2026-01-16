@@ -14,7 +14,7 @@ class ExaminerController extends Controller
     public function index()
     {
         $examiners = Examiner::with(['media'])
-            ->where('active', true)
+            ->where('active', 'true')
             ->get();
 
         return response()->json($examiners, Response::HTTP_OK);
@@ -25,8 +25,7 @@ class ExaminerController extends Controller
      */
     public function show($id)
     {
-        $examiner = Examiner::with(['user', 'media'])
-            ->find($id);
+        $examiner = Examiner::with(['user', 'media.media'])->find($id);
 
         if (!$examiner) {
             return response()->json([
@@ -34,8 +33,31 @@ class ExaminerController extends Controller
             ], Response::HTTP_NOT_FOUND);
         }
 
+        $examiner->media = $examiner->media->map(function ($mediaItem) {
+            return [
+                'id' => $mediaItem->id,
+                'type' => $mediaItem->type,
+                'file_data' => [
+                    'id' => $mediaItem->media->id,
+                    'original_name' => $mediaItem->media->original_name,
+                    'mime_type' => $mediaItem->media->mime_type,
+                    'size' => $mediaItem->media->size,
+                    'disk' => $mediaItem->media->disk,
+                    'path' => $mediaItem->media->path,
+                    'url' => $mediaItem->media->url,
+                    'md5_hash' => $mediaItem->media->md5_hash,
+                    'created_at' => $mediaItem->media->created_at,
+                    'updated_at' => $mediaItem->media->updated_at,
+                ],
+                'created_at' => $mediaItem->created_at,
+                'updated_at' => $mediaItem->updated_at,
+            ];
+        });
+
         return response()->json($examiner, Response::HTTP_OK);
     }
+
+
 
     /**
      * Create examiner
