@@ -55,7 +55,7 @@ class MediaController extends Controller
         $fileName = Str::uuid() . '.' . $extension;
 
         // Costruisci il path: auditor/[folder_aggiuntiva/]filename
-        $basePath = 'file_auditor';
+        $basePath = 'file_exam';
         if (!empty($additionalFolder)) {
             $basePath .= '/' . trim($additionalFolder, '/');
         }
