@@ -26,7 +26,7 @@ class Examiner extends Model
 
     protected $casts = [
         'id_user' => 'integer',
-        'active' => 'boolean',
+        'active' => 'string',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

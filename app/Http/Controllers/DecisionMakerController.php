@@ -14,7 +14,7 @@ class DecisionMakerController extends Controller
     public function index()
     {
         $decisionMakers = DecisionsMaker::with(['media'])
-            ->where('active', true)
+            ->where('active', 'true')
             ->get();
 
         return response()->json($decisionMakers, Response::HTTP_OK);
@@ -25,14 +25,34 @@ class DecisionMakerController extends Controller
      */
     public function show($id)
     {
-        $decisionMaker = DecisionsMaker::with(['user', 'media'])
-            ->find($id);
+        $decisionMaker = DecisionsMaker::with(['user', 'media.media'])->find($id);
 
         if (!$decisionMaker) {
             return response()->json([
-                'message' => 'Decision maker not found'
+                'message' => 'Examiner not found'
             ], Response::HTTP_NOT_FOUND);
         }
+
+        $decisionMaker->media = $decisionMaker->media->map(function ($mediaItem) {
+            return [
+                'id' => $mediaItem->id,
+                'type' => $mediaItem->type,
+                'file_data' => [
+                    'id' => $mediaItem->media->id,
+                    'original_name' => $mediaItem->media->original_name,
+                    'mime_type' => $mediaItem->media->mime_type,
+                    'size' => $mediaItem->media->size,
+                    'disk' => $mediaItem->media->disk,
+                    'path' => $mediaItem->media->path,
+                    'url' => $mediaItem->media->url,
+                    'md5_hash' => $mediaItem->media->md5_hash,
+                    'created_at' => $mediaItem->media->created_at,
+                    'updated_at' => $mediaItem->media->updated_at,
+                ],
+                'created_at' => $mediaItem->created_at,
+                'updated_at' => $mediaItem->updated_at,
+            ];
+        });
 
         return response()->json($decisionMaker, Response::HTTP_OK);
     }
@@ -70,7 +90,7 @@ class DecisionMakerController extends Controller
                 'surname' => $validated['surname'],
                 'email'   => $validated['email'],
                 'phone'   => $validated['phone'],
-                'active'  => true,
+                'active'  => 'true',
             ]);
 
             foreach ($validated['media'] as $media) {
@@ -103,8 +123,6 @@ class DecisionMakerController extends Controller
             'surname' => 'sometimes|string|max:255',
             'email'   => 'sometimes|email|unique:decisions_makers,email,' . $decisionMaker->id,
             'phone'   => 'nullable|string|max:50',
-            'id_user' => 'sometimes|integer|exists:users,id',
-
             'media'        => 'sometimes|array|min:1',
             'media.*.type' => 'required_with:media|string|max:50',
             'media.*.id'   => 'required_with:media|integer|exists:media,id',
