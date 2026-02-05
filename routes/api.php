@@ -1,10 +1,13 @@
 <?php
 
 
+use App\Http\Controllers\EmailVerificationController;
+use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DecisionMakerController;
 use App\Http\Controllers\ExaminerController;
 use App\Http\Controllers\MediaController;
+use App\Http\Controllers\ResendVerificationController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UtilsController;
 use Illuminate\Http\Request;
@@ -28,6 +31,9 @@ Route::post('/refresh-token', [AuthController::class, 'refreshToken']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 Route::post('/verify-reset-token', [AuthController::class, 'verifyResetToken']);
+Route::post('/register', [RegisterController::class, 'register']);
+Route::get('/verify-email/{token}', [EmailVerificationController::class, 'verify']);
+Route::post('/resend-verification', [ResendVerificationController::class, 'resend']);
 
 
 //debug jwt

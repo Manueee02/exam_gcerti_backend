@@ -25,6 +25,25 @@ class AuthController extends Controller
 
         $credentials = $request->only('email', 'password');
 
+        // Recuperiamo l'utente basandoci sull'email
+        $user = \App\Models\User::where('email', $credentials['email'])->first();
+
+        if (!$user) {
+            return response()->json([
+                'error' => 'Email o password non valide',
+                'message' => 'Credenziali non valide'
+            ], 401);
+        }
+
+        // Controllo se l'email è verificata
+        if (is_null($user->email_verified_at)) {
+            return response()->json([
+                'error' => 'Email non verificata',
+                'message' => 'Devi verificare la tua email per accedere'
+            ], 403); // 403 Forbidden
+        }
+
+        // Tentativo di login
         if (!$token = Auth::attempt($credentials)) {
             return response()->json([
                 'error' => 'Email o password non valide',
@@ -32,11 +51,12 @@ class AuthController extends Controller
             ], 401);
         }
 
-        $user = Auth::user()->load('role');
+        $user->load('role');
         $refreshToken = $this->generateRefreshToken($user);
 
         return $this->respondWithToken($token, $refreshToken);
     }
+
 
     /**
      * Verifica il token corrente (utile per l'AuthGuard)

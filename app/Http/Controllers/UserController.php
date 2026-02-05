@@ -96,6 +96,8 @@ class UserController extends Controller
             'email' => $request->email,
             'password' => $hashedPassword,
             'id_role' => $request->id_role,
+            'email_verified_at' => now(),
+            'candidate_registration_completed' => 'false',
         ]);
 
         // Invio mail con credenziali
