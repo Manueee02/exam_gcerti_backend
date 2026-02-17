@@ -1,6 +1,7 @@
 <?php
 
 
+use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\EmailVerificationController;
 use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\AuthController;
@@ -56,7 +57,7 @@ Route::get('/test-jwt', function (Request $request) {
 });
 
 
-Route::middleware('auth:api')->group(function () {
+Route::middleware('auth:api', 'log.activity')->group(function () {
     // Auth routes
     Route::prefix('auth')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
@@ -82,7 +83,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('download/{id}', [MediaController::class, 'show']);
         Route::delete('delete/{id}', [MediaController::class, 'destroy']);
     });
-
+    //Esaminatori
     Route::middleware('role:admin,superAdmin')
         ->prefix('examiners')
         ->group(function () {
@@ -95,7 +96,7 @@ Route::middleware('auth:api')->group(function () {
 
         }
     );
-
+    //Deliberanti
     Route::middleware('role:admin,superAdmin')
         ->prefix('decision-makers')
         ->group(function () {
@@ -108,6 +109,18 @@ Route::middleware('auth:api')->group(function () {
 
         }
         );
+
+    //Candidati
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('candidates')
+        ->group(function () {
+            Route::post('/store', [DecisionMakerController::class, 'store']);
+            Route::put('/update/{id}', [CandidateController::class, 'update']);
+        }
+    );
+    Route::middleware('role:admin,superAdmin')
+        ->put('/candidates/delete/{id}', [CandidateController::class, 'delete']);
+
 });
 
 

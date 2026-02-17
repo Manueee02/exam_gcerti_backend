@@ -31,7 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
             // JWT Auth (se usi tymon/jwt-auth)
             'jwt.auth' => \Tymon\JWTAuth\Http\Middleware\Authenticate::class,
             'jwt.refresh' => \Tymon\JWTAuth\Http\Middleware\RefreshToken::class,
-
+            'log.activity' => \App\Http\Middleware\LogUserActivity::class,
             'role' => \App\Http\Middleware\CheckRole::class,
         ]);
     })

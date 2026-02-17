@@ -19,7 +19,14 @@ class CandidateCompany extends Model
 
     protected $fillable = [
         'id_candidates',
+
+        // tipo fatturazione
+        'billing_type',
+
+        // libero professionista
         'piva',
+
+        // azienda
         'company_piva',
         'company_social_reason',
         'company_mail',

@@ -42,8 +42,14 @@ class Candidate extends Model
         'birthcommun',
         'is_foreign',
         'birthcountry',
+        'residence_address',
+        'residence_city',
+        'residence_province',
+        'residence_zip',
+        'residence_country',
         'active',
     ];
+
 
     // Cast dei campi
     protected $casts = [
