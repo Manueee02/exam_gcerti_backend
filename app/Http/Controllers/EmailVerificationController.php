@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\EmailVerificationToken;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 
 class EmailVerificationController extends Controller
@@ -23,15 +24,16 @@ class EmailVerificationController extends Controller
         }
 
         // Controllo scadenza
-        if ($verification->expires_at->isPast()) {
+        if (now()->greaterThan($verification->expires_at)) {
             return response()->json(['message' => 'Token scaduto'], 400);
         }
+
 
         // Aggiorna utente
         $user = $verification->user;
         $user->email_verified_at = now();
-        $user->first_access = false;
-        $user->candidate_registration_completed = false; // rimane false fino al completamento
+        $user->first_access = "false";
+        $user->candidate_registration_completed = "false"; // rimane false fino al completamento
         $user->save();
 
         // Segna token come usato
@@ -39,7 +41,9 @@ class EmailVerificationController extends Controller
         $verification->save();
 
 
-        return redirect(config('app.frontend_url') . '/email-verified');
+        return response()->json([
+            'message' => 'Mail verificata correttamente',
+        ], 201);
 
     }
 }

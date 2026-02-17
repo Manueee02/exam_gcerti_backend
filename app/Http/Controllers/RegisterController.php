@@ -15,6 +15,11 @@ class RegisterController extends Controller
 {
     public function register(Request $request)
     {
+        if (User::where('email', $request->email)->exists()) {
+            return response()->json([
+                'message' => 'Email già presente nel sistema.'
+            ], 409); // 409 Conflict è semanticamente corretto
+        }
         // 1️⃣ Validazione dati
         $request->validate([
             'name' => 'required|string|max:255',

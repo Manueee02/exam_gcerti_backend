@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\EmailVerificationToken;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Mail;
@@ -31,7 +32,7 @@ class ResendVerificationController extends Controller
             ->orderBy('sent_at', 'desc')
             ->first();
 
-        if ($lastToken && $lastToken->sent_at->diffInMinutes(now()) < 2) {
+        if ($lastToken && Carbon::parse($lastToken->sent_at)->diffInMinutes(now()) < 2) {
             return response()->json(['message' => 'Attendere almeno 2 minuti prima di richiedere un nuovo link'], 429);
         }
 
