@@ -32,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'jwt.auth' => \Tymon\JWTAuth\Http\Middleware\Authenticate::class,
             'jwt.refresh' => \Tymon\JWTAuth\Http\Middleware\RefreshToken::class,
             'log.activity' => \App\Http\Middleware\LogUserActivity::class,
+            'check.active.token' => \App\Http\Middleware\CheckActiveToken::class,
             'role' => \App\Http\Middleware\CheckRole::class,
         ]);
     })

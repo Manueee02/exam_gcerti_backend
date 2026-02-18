@@ -27,15 +27,16 @@ use Illuminate\Support\Facades\Route;
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
-Route::post('/login', [AuthController::class, 'login'])->name('login');
-Route::post('/refresh-token', [AuthController::class, 'refreshToken']);
-Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-Route::post('/reset-password', [AuthController::class, 'resetPassword']);
-Route::post('/verify-reset-token', [AuthController::class, 'verifyResetToken']);
-Route::post('/register', [RegisterController::class, 'register']);
-Route::get('/verify-email/{token}', [EmailVerificationController::class, 'verify']);
-Route::post('/resend-verification', [ResendVerificationController::class, 'resend']);
-
+Route::middleware('log.activity')->group(function () {
+    Route::post('/login', [AuthController::class, 'login'])->name('login');
+    Route::post('/refresh-token', [AuthController::class, 'refreshToken']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+    Route::post('/verify-reset-token', [AuthController::class, 'verifyResetToken']);
+    Route::post('/register', [RegisterController::class, 'register']);
+    Route::get('/verify-email/{token}', [EmailVerificationController::class, 'verify']);
+    Route::post('/resend-verification', [ResendVerificationController::class, 'resend']);
+});
 
 //debug jwt
 Route::get('/test-jwt', function (Request $request) {
@@ -57,7 +58,7 @@ Route::get('/test-jwt', function (Request $request) {
 });
 
 
-Route::middleware('auth:api', 'log.activity')->group(function () {
+Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(function () {
     // Auth routes
     Route::prefix('auth')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);

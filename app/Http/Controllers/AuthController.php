@@ -25,24 +25,6 @@ class AuthController extends Controller
 
         $credentials = $request->only('email', 'password');
 
-        // Recuperiamo l'utente basandoci sull'email
-        $user = \App\Models\User::where('email', $credentials['email'])->first();
-
-        if (!$user) {
-            return response()->json([
-                'error' => 'Email o password non valide',
-                'message' => 'Credenziali non valide'
-            ], 401);
-        }
-
-        // Controllo se l'email è verificata
-        if (is_null($user->email_verified_at)) {
-            return response()->json([
-                'error' => 'Email non verificata',
-                'message' => 'Devi verificare la tua email per accedere'
-            ], 403); // 403 Forbidden
-        }
-
         // Tentativo di login
         if (!$token = Auth::attempt($credentials)) {
             return response()->json([
@@ -51,11 +33,38 @@ class AuthController extends Controller
             ], 401);
         }
 
+        $user = Auth::user();
+
+        // Controllo email verificata
+        if (is_null($user->email_verified_at)) {
+            Auth::logout();
+
+            return response()->json([
+                'error' => 'Email non verificata',
+                'message' => 'Devi verificare la tua email per accedere'
+            ], 403);
+        }
+
+        // 🔥 Invalida eventuale token precedente
+        if ($user->active_token) {
+            try {
+                Auth::setToken($user->active_token)->invalidate(true);
+            } catch (\Exception $e) {
+                // Token già scaduto o non valido
+            }
+        }
+
+        // Salva nuovo token attivo
+        $user->active_token = $token;
+        $user->save();
+
         $user->load('role');
+
         $refreshToken = $this->generateRefreshToken($user);
 
         return $this->respondWithToken($token, $refreshToken);
     }
+
 
 
     /**
@@ -118,9 +127,18 @@ class AuthController extends Controller
      */
     public function logout()
     {
-        $user = Auth::user()->load('role');
+        $user = Auth::user();
+
         if ($user) {
             $user->refresh_token = null;
+
+            if ($user->active_token) {
+                try {
+                    Auth::setToken($user->active_token)->invalidate(true);
+                } catch (\Exception $e) {}
+            }
+
+            $user->active_token = null;
             $user->save();
         }
 
@@ -131,6 +149,7 @@ class AuthController extends Controller
             'message' => 'Logout effettuato con successo',
         ]);
     }
+
 
     /**
      * Verifica se il token è ancora valido
