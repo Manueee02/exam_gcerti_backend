@@ -12,6 +12,179 @@ use Illuminate\Support\Facades\Validator;
 
 class CandidateController extends Controller
 {
+    private function decodificaCodiceFiscale($codiceFiscale): ?array
+    {
+        // Normalizza il codice fiscale (maiuscolo e rimuovi spazi)
+        $codiceFiscale = strtoupper(trim($codiceFiscale));
+
+        // Verifica lunghezza
+        if (strlen($codiceFiscale) !== 16) {
+            return null;
+        }
+
+        try {
+            // Carica la lista dei comuni
+            $comuniPath = base_path('database/comuni.json');
+
+            if (!file_exists($comuniPath)) {
+                throw new \Exception('File comuni.json non trovato');
+            }
+
+            $comuniJson = file_get_contents($comuniPath);
+            $comuni = json_decode($comuniJson, true);
+
+            if (!$comuni) {
+                throw new \Exception('Errore nel parsing del file comuni.json');
+            }
+
+            // Estrai le parti del codice fiscale
+            $cognome = substr($codiceFiscale, 0, 3);
+            $nome = substr($codiceFiscale, 3, 3);
+            $annoNascita = substr($codiceFiscale, 6, 2);
+            $meseNascita = substr($codiceFiscale, 8, 1);
+            $giornoSesso = substr($codiceFiscale, 9, 2);
+            $codiceCatastale = substr($codiceFiscale, 11, 4);
+            $carattereControllo = substr($codiceFiscale, 15, 1);
+
+            // Decodifica il sesso e il giorno di nascita
+            $giorno = intval($giornoSesso);
+            $sesso = 'M'; // Maschio
+
+            if ($giorno > 31) {
+                $sesso = 'F'; // Femmina
+                $giorno = $giorno - 40;
+            }
+
+            // Decodifica il mese
+            $mesi = [
+                'A' => '01',
+                'B' => '02',
+                'C' => '03',
+                'D' => '04',
+                'E' => '05',
+                'H' => '06',
+                'L' => '07',
+                'M' => '08',
+                'P' => '09',
+                'R' => '10',
+                'S' => '11',
+                'T' => '12'
+            ];
+
+            if (!isset($mesi[$meseNascita])) {
+                return null;
+            }
+
+            $mese = $mesi[$meseNascita];
+
+            // Determina l'anno completo (assumendo che gli anni 00-30 siano 2000-2030, e 31-99 siano 1931-1999)
+            $annoCompleto = intval($annoNascita);
+            if ($annoCompleto <= 30) {
+                $annoCompleto += 2000;
+            } else {
+                $annoCompleto += 1900;
+            }
+
+            // Trova il comune dal codice catastale
+            $comuneNascita = null;
+            foreach ($comuni as $comune) {
+                if ($comune['codiceCatastale'] === $codiceCatastale) {
+                    $comuneNascita = $comune;
+                    break;
+                }
+            }
+
+            // Se non trova il comune nei comuni italiani, potrebbe essere un paese estero
+            $luogoNascita = $comuneNascita ? $comuneNascita['nome'] : 'Paese estero (codice: ' . $codiceCatastale . ')';
+            $provincia = $comuneNascita ? $comuneNascita['sigla'] : null;
+
+            // Crea la data di nascita
+            $dataNascita = sprintf('%04d-%02d-%02d', $annoCompleto, intval($mese), $giorno);
+
+            // Verifica che la data sia valida
+            if (!checkdate(intval($mese), $giorno, $annoCompleto)) {
+                return null;
+            }
+
+            return [
+                'codice_fiscale' => $codiceFiscale,
+                'data_nascita' => $dataNascita,
+                'sesso' => $sesso,
+                'luogo_nascita' => $luogoNascita,
+                'provincia_nascita' => $provincia,
+                'anno_nascita' => $annoCompleto,
+                'mese_nascita' => intval($mese),
+                'giorno_nascita' => $giorno,
+            ];
+        } catch (\Exception $e) {
+            \Log::error('Errore nella decodifica del codice fiscale: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    private function estraiDati()
+    {
+        $comuniPath = base_path('database/comuni.json');
+
+        if (!file_exists($comuniPath)) {
+            throw new \Exception('File comuni.json non trovato');
+        }
+
+        $comuniJson = file_get_contents($comuniPath);
+        $comuni = json_decode($comuniJson, true);
+
+        if (!$comuni || !is_array($comuni)) {
+            return response()->json(['error' => 'Formato JSON non valido'], 400);
+        }
+
+        $result = [];
+
+        foreach ($comuni as $comune) {
+            if (
+                isset($comune['popolazione'], $comune['sigla'], $comune['provincia']['nome']) &&
+                $comune['popolazione'] > 10000
+            ) {
+                $sigla = $comune['sigla'];
+
+                // Se la sigla non è ancora nel risultato, inizializzala
+                if (!isset($result[$sigla])) {
+                    $result[$sigla] = [
+                        'provincia' => $sigla,
+                        'citta' => []
+                    ];
+                }
+
+                // Aggiunge la città con i suoi CAP
+                $result[$sigla]['citta'][] = [
+                    'nome' => $comune['nome'],
+                    'cap' => isset($comune['cap']) ? $comune['cap'] : []
+                ];
+            }
+        }
+
+        return response()->json($result);
+    }
+
+    public function getAllData(): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $citta = $this->estraiDati();
+
+            // Organizza i dati nella struttura richiesta
+            $data = [
+                'data' => [
+                    'citta' => $citta,
+                ]
+            ];
+
+            return response()->json($data, 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Errore nel recupero dei dati',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
     // =========================================================================
     // STORE
     // =========================================================================

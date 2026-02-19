@@ -72,11 +72,16 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     Route::get('/advanced-search', [UtilsController::class, 'advancedSearch']);
 
     //users
-    Route::get('/users', [UserController::class, 'index']);
-    Route::get('/users-roles', [UserController::class, 'indexRoles']);
-    Route::put('/change-role-users/{id}', [UserController::class, 'updateRole']);
-    Route::delete('/users/{id}', [UserController::class, 'destroy']);
-    Route::post('/create-user', [UserController::class, 'store']);
+    Route::middleware('role:superAdmin')
+        ->group(function () {
+            Route::get('/users', [UserController::class, 'index']);
+            Route::get('/users-roles', [UserController::class, 'indexRoles']);
+            Route::put('/change-role-users/{id}', [UserController::class, 'updateRole']);
+            Route::delete('/users/{id}', [UserController::class, 'destroy']);
+            Route::post('/create-user', [UserController::class, 'store']);
+        }
+    );
+
 
     //media
     Route::prefix('media')->group(function () {
@@ -84,6 +89,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         Route::get('download/{id}', [MediaController::class, 'show']);
         Route::delete('delete/{id}', [MediaController::class, 'destroy']);
     });
+
     //Esaminatori
     Route::middleware('role:admin,superAdmin')
         ->prefix('examiners')
@@ -97,6 +103,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
 
         }
     );
+
     //Deliberanti
     Route::middleware('role:admin,superAdmin')
         ->prefix('decision-makers')
@@ -115,12 +122,14 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     Route::middleware('role:admin,superAdmin')
         ->prefix('candidates')
         ->group(function () {
-            Route::post('/store', [DecisionMakerController::class, 'store']);
+            Route::post('/store', [CandidateController::class, 'store']);
             Route::put('/update/{id}', [CandidateController::class, 'update']);
         }
     );
-    Route::middleware('role:admin,superAdmin')
-        ->put('/candidates/delete/{id}', [CandidateController::class, 'delete']);
+    Route::middleware('role:admin,superAdmin')->put('/candidates/delete/{id}', [CandidateController::class, 'delete']);
+
+    //Utils
+    Route::get('/get-all-data', [CandidateController::class, 'getAllData']);
 
 });
 
