@@ -116,6 +116,9 @@ class AuthController extends Controller
             $newToken = Auth::login($user, true);
         }
 
+        $user->active_token = $newToken;
+        $user->save();
+
         // Ruota il refresh token per sicurezza
         $newRefreshToken = $this->generateRefreshToken($user);
 

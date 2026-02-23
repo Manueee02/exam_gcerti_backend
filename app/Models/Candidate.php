@@ -57,7 +57,7 @@ class Candidate extends Model
         'birthdate' => 'date',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
-        'active' => 'boolean',
+        'active' => 'string',
     ];
 
     // Relazione con l'utente

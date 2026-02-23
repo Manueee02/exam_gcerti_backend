@@ -192,22 +192,26 @@ class CandidateController extends Controller
     {
         // ─── 1. Validazione base ──────────────────────────────────────────────
         $baseRules = [
-            'id_user'            => ['required', 'integer', 'exists:users,id'],
             'name'               => ['required', 'string', 'max:255'],
             'surname'            => ['required', 'string', 'max:255'],
             'phone'              => ['required', 'string', 'max:50'],
             'fiscal_code'        => ['required', 'string', 'max:16'],
-            'sex'                => ['required', 'string', 'in:M,F,O'],
-            'birthdate'          => ['required', 'date'],
-            'birthplace'         => ['required', 'string', 'max:255'],
-            'birthprovince'      => ['required', 'string', 'max:10'],
-            'birthcommun'        => ['required', 'string', 'max:255'],
-            'is_foreign'         => ['nullable', 'boolean'],
+            'is_foreign'         => ['nullable', 'string'],
             'birthcountry'       => ['nullable', 'string', 'max:255'],
             'residence_address'  => ['required', 'string', 'max:255'],
             'residence_city'     => ['required', 'string', 'max:255'],
-            'residence_province' => ['required', 'string', 'max:10'],
-            'residence_zip'      => ['required', 'string', 'max:10'],
+            'residence_province' => [
+                'required_if:is_foreign,0',
+                'nullable',
+                'string',
+                'max:10'
+            ],
+            'residence_zip' => [
+                'required_if:is_foreign,0',
+                'nullable',
+                'string',
+                'max:10'
+            ],
             'residence_country'  => ['required', 'string', 'max:255'],
             'billing_type'       => ['required', 'string', 'in:personal,freelancer,company'],
             'media'              => ['required', 'array', 'min:2'],
@@ -236,9 +240,18 @@ class CandidateController extends Controller
 
         // ─── 4. Persistenza ───────────────────────────────────────────────────
         try {
+            $decoded = $this->decodificaCodiceFiscale($request->input('fiscal_code'));
+
+            if (!$decoded) {
+                return response()->json([
+                    'success' => false,
+                    'errors'  => ['fiscal_code' => ['Codice fiscale non valido o non decodificabile']]
+                ], 422);
+            }
+
             DB::beginTransaction();
 
-            $user      = User::findOrFail($request->input('id_user'));
+            $user = auth()->user();
             $candidate = Candidate::create([
                 'id_user'            => $user->id,
                 'name'               => $request->input('name'),
@@ -246,23 +259,26 @@ class CandidateController extends Controller
                 'email'              => $user->email,
                 'phone'              => $request->input('phone'),
                 'fiscal_code'        => $request->input('fiscal_code'),
-                'sex'                => $request->input('sex'),
-                'birthdate'          => $request->input('birthdate'),
-                'birthplace'         => $request->input('birthplace'),
-                'birthprovince'      => $request->input('birthprovince'),
-                'birthcommun'        => $request->input('birthcommun'),
-                'is_foreign'         => $request->boolean('is_foreign', false),
+                'sex'                => $decoded['sesso'],
+                'birthdate'          => $decoded['data_nascita'],
+                'birthplace'         => $decoded['luogo_nascita'],
+                'birthprovince'      => $decoded['provincia_nascita'],
+                'birthcommun'        => $decoded['luogo_nascita'],
+                'is_foreign'         => $request->input('is_foreign'),
                 'birthcountry'       => $request->input('birthcountry'),
                 'residence_address'  => $request->input('residence_address'),
                 'residence_city'     => $request->input('residence_city'),
                 'residence_province' => $request->input('residence_province'),
                 'residence_zip'      => $request->input('residence_zip'),
                 'residence_country'  => $request->input('residence_country'),
-                'active'             => true,
+                'active'             => "true",
             ]);
 
             $this->syncCompany($candidate->id, $billingType, $request);
             $this->syncMedia($candidate->id, $mediaItems);
+
+            $user->candidate_registration_completed = "true";
+            $user->save();
 
             DB::commit();
 

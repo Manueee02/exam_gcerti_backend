@@ -119,7 +119,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         );
 
     //Candidati
-    Route::middleware('role:admin,superAdmin')
+    Route::middleware('role:user')
         ->prefix('candidates')
         ->group(function () {
             Route::post('/store', [CandidateController::class, 'store']);
