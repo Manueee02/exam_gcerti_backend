@@ -262,13 +262,13 @@ class CandidateController extends Controller
             'residence_address'  => ['required', 'string', 'max:255'],
             'residence_city'     => ['required', 'string', 'max:255'],
             'residence_province' => [
-                'required_if:is_foreign,0',
+                'required_if:is_foreign,0,false',
                 'nullable',
                 'string',
                 'max:10'
             ],
             'residence_zip' => [
-                'required_if:is_foreign,0',
+                'required_if:is_foreign,0,false',
                 'nullable',
                 'string',
                 'max:10'
@@ -371,27 +371,38 @@ class CandidateController extends Controller
 
         // ─── 1. Validazione base (tutti 'sometimes': aggiorna solo i campi inviati) ──
         $baseRules = [
-            'name'               => ['sometimes', 'string', 'max:255'],
-            'surname'            => ['sometimes', 'string', 'max:255'],
-            'phone'              => ['sometimes', 'string', 'max:50'],
-            'fiscal_code'        => ['sometimes', 'string', 'max:16'],
-            'sex'                => ['sometimes', 'string', 'in:M,F,O'],
-            'birthdate'          => ['sometimes', 'date'],
-            'birthplace'         => ['sometimes', 'string', 'max:255'],
-            'birthprovince'      => ['sometimes', 'string', 'max:10'],
-            'birthcommun'        => ['sometimes', 'string', 'max:255'],
-            'is_foreign'         => ['nullable', 'boolean'],
+            'name'               => ['required', 'string', 'max:255'],
+            'surname'            => ['required', 'string', 'max:255'],
+            'phone'              => ['required', 'string', 'max:50'],
+            'fiscal_code'        => ['required', 'string', 'max:16'],
+
+            'is_foreign'         => ['nullable', 'string', 'max:16'],
             'birthcountry'       => ['nullable', 'string', 'max:255'],
-            'residence_address'  => ['sometimes', 'string', 'max:255'],
-            'residence_city'     => ['sometimes', 'string', 'max:255'],
-            'residence_province' => ['sometimes', 'string', 'max:10'],
-            'residence_zip'      => ['sometimes', 'string', 'max:10'],
-            'residence_country'  => ['sometimes', 'string', 'max:255'],
-            'billing_type'       => ['sometimes', 'string', 'in:personal,freelancer,company'],
-            // Media opzionale in update: se inviato deve essere completo e valido
-            'media'              => ['sometimes', 'array', 'min:2'],
-            'media.*.id_media'   => ['required_with:media', 'integer', 'exists:media,id'],
-            'media.*.type'       => ['required_with:media', 'string', 'in:fiscal_code,id_document,curriculum'],
+
+            'residence_address'  => ['required', 'string', 'max:255'],
+            'residence_city'     => ['required', 'string', 'max:255'],
+
+            'residence_province' => [
+                'required_if:is_foreign,0',
+                'nullable',
+                'string',
+                'max:10'
+            ],
+
+            'residence_zip' => [
+                'required_if:is_foreign,0',
+                'nullable',
+                'string',
+                'max:10'
+            ],
+
+            'residence_country'  => ['required', 'string', 'max:255'],
+
+            'company.billing_type' => ['required', 'string', 'in:personal,freelancer,company'],
+
+            'media'              => ['required', 'array', 'min:2'],
+            'media.*.id_media'   => ['required', 'integer', 'exists:media,id'],
+            'media.*.type'       => ['required', 'string', 'in:fiscal_code,id_document,curriculum'],
         ];
 
         $validator = Validator::make($request->all(), $baseRules);
