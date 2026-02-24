@@ -208,6 +208,8 @@ class AuthController extends Controller
             'updated_at' => $user->updated_at,
             'first_access' => $user->first_access,
             'candidate_registration_completed' => $user->candidate_registration_completed,
+            'id_candidate' => optional($user->candidate)->id,
+
         ];
     }
 

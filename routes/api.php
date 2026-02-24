@@ -124,9 +124,18 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->group(function () {
             Route::post('/store', [CandidateController::class, 'store']);
             Route::put('/update/{id}', [CandidateController::class, 'update']);
+
         }
     );
-    Route::middleware('role:admin,superAdmin')->put('/candidates/delete/{id}', [CandidateController::class, 'delete']);
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('candidates')
+        ->group(function () {
+            Route::get('/', [CandidateController::class, 'index']);
+/*            Route::get('/{id}', [CandidateController::class, 'show']);*/
+            Route::put('/candidates/delete/{id}', [CandidateController::class, 'delete']);
+        }
+    );
+    Route::get('candidates/{id}', [CandidateController::class, 'show']);
 
     //Utils
     Route::get('/get-all-data', [CandidateController::class, 'getAllData']);

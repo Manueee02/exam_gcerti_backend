@@ -6,12 +6,15 @@ use App\Models\Candidate;
 use App\Models\CandidateCompany;
 use App\Models\CandidateMedia;
 use App\Models\User;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class CandidateController extends Controller
 {
+    use AuthorizesRequests;
     private function decodificaCodiceFiscale($codiceFiscale): ?array
     {
         // Normalizza il codice fiscale (maiuscolo e rimuovi spazi)
@@ -182,6 +185,64 @@ class CandidateController extends Controller
             return response()->json([
                 'error' => 'Errore nel recupero dei dati',
                 'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+    // =========================================================================
+    // INDEX - GET ALL CANDIDATES
+    // =========================================================================
+    public function index(): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $candidates = Candidate::with([
+                'user',
+                'companies',
+                'media.media'
+            ])->where('active', "true")->get();
+
+            return response()->json([
+                'success'    => true,
+                'count'      => $candidates->count(),
+                'candidates' => $candidates
+            ], 200);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Errore nel recupero dei candidati.',
+                'error'   => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+    // =========================================================================
+    // SHOW - GET SINGLE CANDIDATE BY ID
+    // =========================================================================
+    public function show(int $id): \Illuminate\Http\JsonResponse
+    {
+        try {
+            // Carica relazioni aggiuntive
+            $candidate = Candidate::with(['user','companies','media.media'])
+                ->findOrFail($id);
+
+            // 🔒 Controllo autorizzazione tramite Policy
+            $this->authorize('view', $candidate);
+
+            return response()->json([
+                'success' => true,
+                'candidate' => $candidate
+            ], 200);
+
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            // Se l'utente non è autorizzato
+            return response()->json([
+                'success' => false,
+                'message' => 'Non autorizzato a visualizzare questo candidato.'
+            ], 403);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Errore durante il recupero del candidato.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
