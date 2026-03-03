@@ -36,6 +36,7 @@ class CandidateCompany extends Model
         'company_phone',
         'company_foreign',
         'company_postalcode',
+        'company_zip',
     ];
 
     protected $casts = [

@@ -365,120 +365,97 @@ class CandidateController extends Controller
     public function update(Request $request, int $id)
     {
         $candidate = Candidate::find($id);
+
         if (!$candidate) {
-            return response()->json(['success' => false, 'message' => 'Candidato non trovato.'], 404);
+            return response()->json([
+                'success' => false,
+                'message' => 'Candidato non trovato.'
+            ], 404);
         }
 
-        // ─── 1. Validazione base (tutti 'sometimes': aggiorna solo i campi inviati) ──
-        $baseRules = [
+        // ================= VALIDAZIONE =================
+        $rules = [
             'name'               => ['required', 'string', 'max:255'],
             'surname'            => ['required', 'string', 'max:255'],
             'phone'              => ['required', 'string', 'max:50'],
             'fiscal_code'        => ['required', 'string', 'max:16'],
 
-            'is_foreign'         => ['nullable', 'string', 'max:16'],
-            'birthcountry'       => ['nullable', 'string', 'max:255'],
-
             'residence_address'  => ['required', 'string', 'max:255'],
             'residence_city'     => ['required', 'string', 'max:255'],
-
-            'residence_province' => [
-                'required_if:is_foreign,0',
-                'nullable',
-                'string',
-                'max:10'
-            ],
-
-            'residence_zip' => [
-                'required_if:is_foreign,0',
-                'nullable',
-                'string',
-                'max:10'
-            ],
-
             'residence_country'  => ['required', 'string', 'max:255'],
 
+            // 👇 billing dentro company
             'company.billing_type' => ['required', 'string', 'in:personal,freelancer,company'],
+            'company.company_piva' => ['nullable', 'string', 'max:11'],
+            'company.company_social_reason' => ['nullable', 'string', 'max:255'],
+            'company.company_mail' => ['nullable', 'email'],
+            'company.company_province' => ['nullable', 'string', 'max:255'],
+            'company.company_legal_address' => ['nullable', 'string', 'max:255'],
+            'company.company_city' => ['nullable', 'string', 'max:255'],
+            'company.company_phone' => ['nullable', 'string', 'max:50'],
+            'company.company_zip' => ['nullable', 'string', 'max:10'],
+            'company.is_foreign_company' => ['nullable', 'string', 'in:true,false'],
 
             'media'              => ['required', 'array', 'min:2'],
             'media.*.id_media'   => ['required', 'integer', 'exists:media,id'],
             'media.*.type'       => ['required', 'string', 'in:fiscal_code,id_document,curriculum'],
         ];
 
-        $validator = Validator::make($request->all(), $baseRules);
+        $validator = Validator::make($request->all(), $rules);
+
         if ($validator->fails()) {
-            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
         }
 
-        // ─── 2. Billing (solo se almeno un campo billing è presente) ─────────
-        $billingFields = [
-            'billing_type', 'piva', 'company_piva', 'company_social_reason',
-            'company_mail', 'company_province', 'company_legal_address',
-            'company_city', 'company_phone', 'company_zip', 'is_foreign_company',
-        ];
-        $hasBillingData = $request->hasAny($billingFields);
+        DB::beginTransaction();
 
-        if ($hasBillingData) {
-            // Usa il nuovo billing_type se inviato, altrimenti quello già salvato
-            $billingType  = $request->input('billing_type')
-                ?? $candidate->companies()->latest()->value('billing_type')
-                ?? 'personal';
-            $billingError = $this->validateBilling($request, $billingType, isSometimes: true);
-            if ($billingError) {
-                return response()->json(['success' => false, 'errors' => $billingError], 422);
-            }
-        }
-
-        // ─── 3. Media (solo se presente nel body) ─────────────────────────────
-        if ($request->has('media')) {
-            $mediaItems = collect($request->input('media'));
-            $mediaError = $this->validateMedia($mediaItems);
-            if ($mediaError) {
-                return response()->json(['success' => false, 'errors' => $mediaError], 422);
-            }
-        }
-
-        // ─── 4. Persistenza ───────────────────────────────────────────────────
         try {
-            DB::beginTransaction();
 
-            // Aggiorna solo i campi presenti nel body
-            $candidate->fill(
-                $request->only([
-                    'name', 'surname', 'phone', 'fiscal_code', 'sex',
-                    'birthdate', 'birthplace', 'birthprovince', 'birthcommun',
-                    'is_foreign', 'birthcountry',
-                    'residence_address', 'residence_city', 'residence_province',
-                    'residence_zip', 'residence_country',
-                ])
-            );
+            // ================= UPDATE CANDIDATE =================
+            $candidate->fill($request->only([
+                'name','surname','phone','fiscal_code','sex',
+                'birthdate','birthplace','birthprovince','birthcommun',
+                'residence_address','residence_city',
+                'residence_province','residence_zip','residence_country',
+                'is_foreign','birthcountry'
+            ]));
+
             $candidate->save();
 
-            // Aggiorna billing solo se dati billing presenti
-            if ($hasBillingData) {
-                $this->syncCompany($candidate->id, $billingType, $request, update: true);
-            }
+            // ================= UPDATE COMPANY =================
+            $billingType = $request->input('company.billing_type')
+                ?? $request->input('billing_type');
 
-            // Sostituisce tutti i media solo se l'array è stato inviato
-            if ($request->has('media')) {
-                $candidate->media()->delete();
-                $this->syncMedia($candidate->id, collect($request->input('media')));
-            }
+            $this->syncCompany(
+                $candidate->id,
+                $billingType,
+                $request,
+                true
+            );
+
+            // ================= UPDATE MEDIA =================
+            $candidate->media()->delete();
+            $this->syncMedia($candidate->id, collect($request->input('media')));
 
             DB::commit();
 
             return response()->json([
-                'success'   => true,
-                'message'   => 'Candidato aggiornato con successo.',
-                'candidate' => $candidate->fresh()->load(['user', 'companies', 'media.media']),
+                'success' => true,
+                'message' => 'Candidato aggiornato con successo.',
+                'candidate' => $candidate->fresh()->load(['user','companies','media.media'])
             ]);
 
         } catch (\Throwable $e) {
+
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => "Errore durante l'aggiornamento del candidato.",
-                'error'   => config('app.debug') ? $e->getMessage() : null,
+                'message' => "Errore durante l'aggiornamento.",
+                'error' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -518,7 +495,9 @@ class CandidateController extends Controller
         $req = $isSometimes ? 'sometimes' : 'required';
 
         // Determina se l'azienda è estera (campo is_foreign_company, stringa "true"/"false")
-        $isCompanyForeign = $request->input('is_foreign_company') === 'true';
+        $isCompanyForeign =
+            $request->input('company.company_foreign') === 'true' ||
+            $request->input('company_foreign') === 'true';
 
         $billingRules = match ($billingType) {
             'personal'   => [],
@@ -539,7 +518,7 @@ class CandidateController extends Controller
                     ? ['nullable', 'string', 'max:10']
                     : [$req, 'string', 'max:10'],
                 // is_foreign_company: stringa "true" o "false"
-                'is_foreign_company'    => ['nullable', 'string', 'in:true,false'],
+                'company_foreign'    => ['nullable', 'string', 'in:true,false'],
             ],
             default => [],
         };
@@ -578,35 +557,55 @@ class CandidateController extends Controller
     /**
      * Crea o aggiorna il record CandidateCompany.
      */
-    private function syncCompany(int $candidateId, string $billingType, Request $request, bool $update = false): void
-    {
-        $data = ['billing_type' => $billingType];
+    private function syncCompany(
+        int $candidateId,
+        string $billingType,
+        Request $request,
+        bool $update = false
+    ): void {
 
-        if ($billingType === 'freelancer') {
-            if ($request->has('piva')) $data['piva'] = $request->input('piva');
-        } elseif ($billingType === 'company') {
-            foreach ([
-                         'company_piva',
-                         'company_social_reason',
-                         'company_mail',
-                         'company_province',
-                         'company_legal_address',
-                         'company_city',
-                         'company_phone',
-                         'company_zip',
-                         'is_foreign_company',
-                     ] as $field) {
-                if ($request->has($field)) $data[$field] = $request->input($field);
-            }
+        // Se esiste oggetto company uso quello
+        $companyData = $request->input('company');
+
+        if (is_array($companyData)) {
+            $data = $companyData;
+        } else {
+            // Altrimenti uso campi flat (store)
+            $data = $request->only([
+                'piva',
+                'company_piva',
+                'company_social_reason',
+                'company_mail',
+                'company_province',
+                'company_legal_address',
+                'company_city',
+                'company_phone',
+                'company_zip',
+                'is_foreign_company',
+                'company_foreign'
+            ]);
         }
+
+        // Uniformo eventuale company_foreign
+        if (isset($data['company_foreign'])) {
+            $data['is_foreign_company'] = $data['company_foreign'];
+            unset($data['company_foreign']);
+        }
+
+        // Imposto sempre billing_type corretto
+        $data['billing_type'] = $billingType;
 
         if ($update) {
-            CandidateCompany::updateOrCreate(['id_candidates' => $candidateId], $data);
+            CandidateCompany::updateOrCreate(
+                ['id_candidates' => $candidateId],
+                $data
+            );
         } else {
-            CandidateCompany::create(array_merge(['id_candidates' => $candidateId], $data));
+            CandidateCompany::create(
+                array_merge(['id_candidates' => $candidateId], $data)
+            );
         }
     }
-
     /**
      * Inserisce i record CandidateMedia per un candidato.
      */
