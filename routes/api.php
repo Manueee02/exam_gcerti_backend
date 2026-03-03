@@ -130,9 +130,8 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     Route::middleware('role:admin,superAdmin')
         ->prefix('candidates')
         ->group(function () {
-            Route::get('/', [CandidateController::class, 'index']);
-/*            Route::get('/{id}', [CandidateController::class, 'show']);*/
-            Route::put('/candidates/delete/{id}', [CandidateController::class, 'delete']);
+            Route::get('/all', [CandidateController::class, 'index']);
+            Route::put('/delete/{id}', [CandidateController::class, 'delete']);
         }
     );
     Route::get('candidates/{id}', [CandidateController::class, 'show']);
