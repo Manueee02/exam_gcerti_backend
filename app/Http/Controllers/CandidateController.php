@@ -414,7 +414,7 @@ class CandidateController extends Controller
         $billingFields = [
             'billing_type', 'piva', 'company_piva', 'company_social_reason',
             'company_mail', 'company_province', 'company_legal_address',
-            'company_city', 'company_phone',
+            'company_city', 'company_phone', 'company_zip', 'is_foreign_company',
         ];
         $hasBillingData = $request->hasAny($billingFields);
 
@@ -517,6 +517,9 @@ class CandidateController extends Controller
     {
         $req = $isSometimes ? 'sometimes' : 'required';
 
+        // Determina se l'azienda è estera (campo is_foreign_company, stringa "true"/"false")
+        $isCompanyForeign = $request->input('is_foreign_company') === 'true';
+
         $billingRules = match ($billingType) {
             'personal'   => [],
             'freelancer' => [
@@ -526,10 +529,17 @@ class CandidateController extends Controller
                 'company_piva'          => [$req, 'string', 'max:11'],
                 'company_social_reason' => [$req, 'string', 'max:255'],
                 'company_mail'          => [$req, 'email', 'max:255'],
-                'company_province'      => [$req, 'string', 'max:10'],
                 'company_legal_address' => [$req, 'string', 'max:255'],
                 'company_city'          => [$req, 'string', 'max:255'],
                 'company_phone'         => [$req, 'string', 'max:50'],
+                // company_province: obbligatorio sempre (contiene paese se estera)
+                'company_province'      => [$req, 'string', 'max:255'],
+                // company_zip: obbligatorio solo per aziende italiane
+                'company_zip'    => $isCompanyForeign
+                    ? ['nullable', 'string', 'max:10']
+                    : [$req, 'string', 'max:10'],
+                // is_foreign_company: stringa "true" o "false"
+                'is_foreign_company'    => ['nullable', 'string', 'in:true,false'],
             ],
             default => [],
         };
@@ -576,8 +586,15 @@ class CandidateController extends Controller
             if ($request->has('piva')) $data['piva'] = $request->input('piva');
         } elseif ($billingType === 'company') {
             foreach ([
-                         'company_piva', 'company_social_reason', 'company_mail',
-                         'company_province', 'company_legal_address', 'company_city', 'company_phone',
+                         'company_piva',
+                         'company_social_reason',
+                         'company_mail',
+                         'company_province',
+                         'company_legal_address',
+                         'company_city',
+                         'company_phone',
+                         'company_zip',
+                         'is_foreign_company',
                      ] as $field) {
                 if ($request->has($field)) $data[$field] = $request->input($field);
             }
