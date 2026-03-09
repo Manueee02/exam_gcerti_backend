@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\UserCreatedExaminerDecisionmaker;
 use App\Models\UserRole;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -101,6 +102,58 @@ class UserController extends Controller
         ]);
 
         // Invio mail con credenziali
+        Mail::to($newUser->email)->send(new UserCredentials($newUser, $rawPassword));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Utente creato e credenziali inviate via email',
+            'user' => $newUser->load('role'),
+        ], 201);
+    }
+
+    public function storeServerApp1User(Request $request)
+    {
+        $user = Auth::user()?->load('role');
+
+        if (!$user || $user->role->name !== 'superAdmin') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Non sei autorizzato a creare utenti'
+            ], 403);
+        }
+
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email',
+            'id_role' => 'required|exists:user_roles,id',
+            'id_auditor' => 'required|integer'
+        ]);
+
+        if (User::where('email', $request->email)->exists()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Un utente con questa email esiste già',
+            ], 409);
+        }
+
+        $rawPassword = strtolower(str_replace(' ', '.', $request->name)) . '.' . rand(1000, 9999);
+        $hashedPassword = bcrypt($rawPassword);
+
+        $newUser = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => $hashedPassword,
+            'id_role' => $request->id_role,
+            'email_verified_at' => now(),
+            'candidate_registration_completed' => 'false',
+        ]);
+
+        // 🔹 Salvataggio nella nuova tabella
+        UserCreatedExaminerDecisionmaker::create([
+            'id_auditor' => $request->id_auditor,
+            'id_user' => $newUser->id
+        ]);
+
         Mail::to($newUser->email)->send(new UserCredentials($newUser, $rawPassword));
 
         return response()->json([

@@ -81,6 +81,11 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::post('/create-user', [UserController::class, 'store']);
         }
     );
+    Route::middleware('role:admin,superAdmin')
+        ->group(function () {
+            Route::post('/create-user-server', [UserController::class, 'storeServerApp1User']);
+        }
+    );
 
 
     //media
