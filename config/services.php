@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'app1' => [
+        'url' => env('APP1_API_URL'),
+        'token' => env('APP1_SERVER_TOKEN'),
+    ],
+
 ];
