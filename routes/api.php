@@ -91,9 +91,17 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
 
     //media
     Route::prefix('media')->group(function () {
+        // ── Originali (invariate) ──────────────────────────────────────────────
         Route::post('upload', [MediaController::class, 'upload']);
         Route::get('download/{id}', [MediaController::class, 'show']);
         Route::delete('delete/{id}', [MediaController::class, 'destroy']);
+
+        // ── Nuovi endpoint soft delete (mode=edit) ─────────────────────────────
+        Route::post('/{id}/soft-delete',      [MediaController::class, 'softDelete']);       // marca vecchio file come pending
+        Route::post('/restore',               [MediaController::class, 'restore']);           // annulla soft delete (body: {ids})
+        Route::post('/confirm-deletes',       [MediaController::class, 'confirmDeletes']);    // elimina davvero i pending (body: {ids})
+        Route::post('/confirm-uploads',       [MediaController::class, 'confirmUploads']);    // promuovi temporanei a permanenti (body: {ids})
+        Route::post('/discard-temporaries',   [MediaController::class, 'discardTemporaries']); // elimina temporanei orfani (body: {ids})
     });
 
     //Esaminatori
