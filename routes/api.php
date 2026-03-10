@@ -84,6 +84,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     Route::middleware('role:admin,superAdmin')
         ->group(function () {
             Route::post('/create-user-server', [UserController::class, 'storeServerApp1User']);
+            Route::get('/has-server-user/{id_auditor}', [UserController::class, 'auditorHasUser']);
         }
     );
 

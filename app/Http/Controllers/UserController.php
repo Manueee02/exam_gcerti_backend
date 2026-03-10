@@ -163,4 +163,13 @@ class UserController extends Controller
         ], 201);
     }
 
+    public function auditorHasUser($id_auditor)
+    {
+        $exists = UserCreatedExaminerDecisionmaker::where('id_auditor', $id_auditor)->exists();
+
+        return response()->json([
+            'has_user' => $exists
+        ], 200);
+    }
+
 }
