@@ -26,32 +26,13 @@ class Server1Controller extends Controller
 
 
 
-    public function getExaminers(Request $request)
+    public function index(Request $request)
     {
-        $query = [];
+        $filters = $request->only(['type', 'status']);
 
-        if ($request->has('type')) {
-            $query['type'] = $request->get('type');
-        }
+        $result = $this->examinerService->getExaminers($filters);
 
-        if ($request->has('status')) {
-            $query['status'] = $request->get('status');
-        }
-
-        $response = Http::withToken(config('services.app1.token'))
-            ->get(config('services.app1.url') . '/examiner', $query);
-
-        if (!$response->successful()) {
-            return [
-                'status' => $response->status(),
-                'error' => 'Errore contattando App 1'
-            ];
-        }
-
-        return [
-            'status' => $response->status(),
-            'data' => $response->json()
-        ];
+        return response()->json($result, $result['status']);
     }
 
     public function updateExaminer(Request $request, $id)

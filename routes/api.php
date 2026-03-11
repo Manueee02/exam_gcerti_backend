@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Route;
 | is assigned the "api" middleware group. Enjoy building your API!
 |
 */
+Route::get('/planned-exams/reference-data', [PlannedExamController::class, 'referenceData']);
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
@@ -117,7 +118,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::post('/', [ExaminerController::class, 'store']);
             Route::put('/{id}', [ExaminerController::class, 'update']);
             Route::delete('/{id}', [ExaminerController::class, 'destroy']);
-            Route::get('/serverApp/examiner-decisionmaker', [Server1Controller::class, 'getExaminers']);
+            Route::get('/serverApp/examiner-decisionmaker', [Server1Controller::class, 'index']);
             Route::get('/serverApp/show/{id}', [Server1Controller::class, 'show']);
             Route::put('/serverApp/update/{id}', [Server1Controller::class, 'updateExaminer']);
             Route::post('/serverApp/qualifications/update-status', [Server1Controller::class, 'updateQualificationStatus']);
@@ -137,7 +138,21 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::delete('/{id}', [DecisionMakerController::class, 'destroy']);
 
         }
-        );
+    );
+
+    //Esami pianificati
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('planned-exams')
+        ->group(function () {
+/*            Route::get('/planned-exams/reference-data', [PlannedExamController::class, 'referenceData']);*/
+            Route::get('/planned-exams/{id}', [PlannedExamController::class, 'show']);
+            Route::post('/planned-exams', [PlannedExamController::class, 'store']);
+            Route::put('/planned-exams/{id}', [PlannedExamController::class, 'update']);
+            Route::delete('/planned-exams/{id}', [PlannedExamController::class, 'destroy']);
+        }
+    );
+    Route::get('/planned-exams', [PlannedExamController::class, 'index']);
+
 
     //Candidati
     Route::middleware('role:user')

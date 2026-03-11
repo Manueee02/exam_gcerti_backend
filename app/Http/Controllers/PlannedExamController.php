@@ -2,12 +2,20 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Exam;
 use App\Models\PlannedExam;
+use App\Services\ExaminerService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 
 class PlannedExamController extends Controller
 {
+    protected ExaminerService $examinerService;
+
+    public function __construct(ExaminerService $examinerService)
+    {
+        $this->examinerService = $examinerService;
+    }
+
 
     // GET /api/planned-exams
     public function index()
@@ -15,11 +23,35 @@ class PlannedExamController extends Controller
         $plannedExams = PlannedExam::with([
             'exam',
             'testCenter',
-            'examiner',
-            'decisionMaker'
         ])->get();
 
-        return response()->json($plannedExams);
+        // Fetch esaminatori e decision maker dal service esterno
+        $examinersResponse = $this->examinerService->getExaminers([
+            'type'   => 'examiner',
+            'status' => 'qualificato',
+        ]);
+
+        $decisionMakersResponse = $this->examinerService->getExaminers([
+            'type'   => 'decision_maker',
+            'status' => 'qualificato',
+        ]);
+
+        $examiners = collect($examinersResponse['data'] ?? [])
+            ->keyBy('id')
+            ->map(fn($e) => ['name' => $e['name'], 'surname' => $e['surname']]);
+
+        $decisionMakers = collect($decisionMakersResponse['data'] ?? [])
+            ->keyBy('id')
+            ->map(fn($e) => ['name' => $e['name'], 'surname' => $e['surname']]);
+
+        $result = $plannedExams->map(function ($plannedExam) use ($examiners, $decisionMakers) {
+            $data = $plannedExam->toArray();
+            $data['examiner']       = $examiners->get($plannedExam->id_examiner);
+            $data['decision_maker'] = $decisionMakers->get($plannedExam->id_decision_maker);
+            return $data;
+        });
+
+        return response()->json($result);
     }
 
 
@@ -29,11 +61,8 @@ class PlannedExamController extends Controller
         $plannedExam = PlannedExam::with([
             'exam',
             'testCenter',
-            'decisionMaker',
             'candidateExams'
         ])->find($id);
-
-        $examiner = $this->getExaminer($plannedExam->id_examiner);
 
         if (!$plannedExam) {
             return response()->json([
@@ -41,7 +70,27 @@ class PlannedExamController extends Controller
             ], 404);
         }
 
-        return response()->json($plannedExam);
+        // Fetch esaminatore e decision maker tramite ID
+        $examinerResponse     = $this->examinerService->getExaminer($plannedExam->id_examiner);
+        $decisionMakerResponse = $this->examinerService->getExaminer($plannedExam->id_decision_maker);
+
+        $examiner = null;
+        if (isset($examinerResponse['data'])) {
+            $e = $examinerResponse['data'];
+            $examiner = ['nome' => $e['nome'], 'cognome' => $e['cognome']];
+        }
+
+        $decisionMaker = null;
+        if (isset($decisionMakerResponse['data'])) {
+            $d = $decisionMakerResponse['data'];
+            $decisionMaker = ['nome' => $d['nome'], 'cognome' => $d['cognome']];
+        }
+
+        $data                  = $plannedExam->toArray();
+        $data['examiner']      = $examiner;
+        $data['decision_maker'] = $decisionMaker;
+
+        return response()->json($data);
     }
 
 
@@ -49,19 +98,19 @@ class PlannedExamController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'id_exam' => 'required|integer',
-            'id_test_center' => 'required|integer',
-            'id_examiner' => 'required|integer',
+            'id_exam'           => 'required|integer',
+            'id_test_center'    => 'required|integer',
+            'id_examiner'       => 'required|integer',
             'id_decision_maker' => 'required|integer',
-            'date' => 'required|date',
-            'time' => 'required'
+            'date'              => 'required|date',
+            'time'              => 'required'
         ]);
 
         $plannedExam = PlannedExam::create($validated);
 
         return response()->json([
             'message' => 'Sessione d\'esame creata',
-            'data' => $plannedExam
+            'data'    => $plannedExam
         ], 201);
     }
 
@@ -78,19 +127,19 @@ class PlannedExamController extends Controller
         }
 
         $validated = $request->validate([
-            'id_exam' => 'sometimes|integer',
-            'id_test_center' => 'sometimes|integer',
-            'id_examiner' => 'sometimes|integer',
+            'id_exam'           => 'sometimes|integer',
+            'id_test_center'    => 'sometimes|integer',
+            'id_examiner'       => 'sometimes|integer',
             'id_decision_maker' => 'sometimes|integer',
-            'date' => 'sometimes|date',
-            'time' => 'sometimes'
+            'date'              => 'sometimes|date',
+            'time'              => 'sometimes'
         ]);
 
         $plannedExam->update($validated);
 
         return response()->json([
             'message' => 'Sessione d\'esame aggiornata',
-            'data' => $plannedExam
+            'data'    => $plannedExam
         ]);
     }
 
@@ -106,7 +155,6 @@ class PlannedExamController extends Controller
             ], 404);
         }
 
-        // controllo candidati iscritti
         if ($plannedExam->candidateExams()->exists()) {
             return response()->json([
                 'message' => 'Impossibile eliminare la sessione: ci sono candidati iscritti'
@@ -120,6 +168,44 @@ class PlannedExamController extends Controller
         ]);
     }
 
+    // GET /api/planned-exams/reference-data
+    public function referenceData()
+    {
+        // Esami dal DB locale
+        $exams = Exam::all();
 
+        // Esaminatori dal service esterno
+        $examinersResponse = $this->examinerService->getExaminers([
+            'type'   => 'examiner',
+            'status' => 'qualificato',
+        ]);
 
+        $examiners = collect($examinersResponse['data']['data'] ?? [])
+            ->map(fn($e) => [
+                'id'      => $e['id'],
+                'name'    => $e['name'],
+                'surname' => $e['surname'],
+            ])
+            ->values();
+
+        // Decision maker dal service esterno
+        $decisionMakersResponse = $this->examinerService->getExaminers([
+            'type'   => 'decision_maker',
+            'status' => 'qualificato',
+        ]);
+
+        $decisionMakers = collect($decisionMakersResponse['data']['data'] ?? [])
+            ->map(fn($e) => [
+                'id'      => $e['id'],
+                'name'    => $e['name'],
+                'surname' => $e['surname'],
+            ])
+            ->values();
+
+        return response()->json([
+            'exams'          => $exams,
+            'examiners'      => $examiners,
+            'decision_makers' => $decisionMakers,
+        ]);
+    }
 }
