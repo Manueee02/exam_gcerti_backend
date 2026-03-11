@@ -120,12 +120,6 @@ class PlannedExamController extends Controller
         ]);
     }
 
-    public function getExaminer($id)
-    {
-        $response = Http::withToken(config('services.app1.token'))
-            ->get(config('services.app1.url') . '/examiner/' . $id);
 
-        return $response->successful() ? $response->json() : null;
-    }
 
 }
