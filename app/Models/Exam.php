@@ -21,6 +21,7 @@ class Exam extends Model
         'description',
         'cost',
         'active',
+        'color'
     ];
 
     protected $casts = [

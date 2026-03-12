@@ -16,6 +16,21 @@ class PlannedExamController extends Controller
         $this->examinerService = $examinerService;
     }
 
+     private function cleanDateTime(string $value, string $type = 'date'): string {
+        // Controlla se è un valore valido
+        if (empty($value)) return '';
+
+        $timestamp = strtotime($value);
+
+        if ($type === 'date') {
+            return date('Y-m-d', $timestamp); // formato 2026-03-12
+        } elseif ($type === 'time') {
+            return date('H:i', $timestamp);   // formato 16:00
+        }
+
+        return $value;
+    }
+
 
     // GET /api/planned-exams
     public function index()
@@ -37,18 +52,47 @@ class PlannedExamController extends Controller
         ]);
 
         $examiners = collect($examinersResponse['data'] ?? [])
-            ->keyBy('id')
-            ->map(fn($e) => ['name' => $e['name'], 'surname' => $e['surname']]);
+            ->keyBy('id');
 
-        $decisionMakers = collect($decisionMakersResponse['data'] ?? [])
-            ->keyBy('id')
-            ->map(fn($e) => ['name' => $e['name'], 'surname' => $e['surname']]);
+/*        $decisionMakers = collect($decisionMakersResponse['data'] ?? [])
+            ->keyBy('id');*/
 
-        $result = $plannedExams->map(function ($plannedExam) use ($examiners, $decisionMakers) {
-            $data = $plannedExam->toArray();
-            $data['examiner']       = $examiners->get($plannedExam->id_examiner);
-            $data['decision_maker'] = $decisionMakers->get($plannedExam->id_decision_maker);
-            return $data;
+        $result = $plannedExams->map(function ($plannedExam) use ($examiners/*, $decisionMakers*/) {
+
+            $exam = $plannedExam->exam;
+
+            $examiner = $examiners->get($plannedExam->id_examiner);
+/*            $decisionMaker = $decisionMakers->get($plannedExam->id_decision_maker);*/
+
+            return [
+                'id' => $plannedExam->id,
+                'title' => $exam?->name,
+                'date' =>  $this->cleanDateTime($plannedExam->date, 'date'),
+                'time' =>  $this->cleanDateTime($plannedExam->time, 'time'),
+                'endTime' =>  $this->cleanDateTime($plannedExam->end_time, 'time'),
+
+                'color' => $exam?->color,
+                'cost' => $exam?->cost,
+                'tag' => $exam?->type,
+
+                /*'attendees' => collect([
+                    $examiner,
+                    $decisionMaker
+                ])->filter()->map(function ($person) {
+                    return [
+                        'name' => $person['name'] . ' ' . $person['surname'],
+                        'avatar' => strtoupper(substr($person['name'],0,1) . substr($person['surname'],0,1)),
+                        'color' => '#' . substr(md5($person['id']),0,6)
+                    ];
+                })->values(),*/
+
+                'location' => $plannedExam->location,
+                'description' => $exam?->description,
+
+                'organizer' => $examiner
+                    ? $examiner['name'] . ' ' . $examiner['surname']
+                    : null,
+            ];
         });
 
         return response()->json($result);
@@ -99,11 +143,11 @@ class PlannedExamController extends Controller
     {
         $validated = $request->validate([
             'id_exam'           => 'required|integer',
-            'id_test_center'    => 'required|integer',
             'id_examiner'       => 'required|integer',
             'id_decision_maker' => 'required|integer',
             'date'              => 'required|date',
-            'time'              => 'required'
+            'time'              => 'required',
+            'end_time'              => 'required'
         ]);
 
         $plannedExam = PlannedExam::create($validated);

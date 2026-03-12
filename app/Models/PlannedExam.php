@@ -22,6 +22,8 @@ class PlannedExam extends Model
         'id_decision_maker',
         'date',
         'time',
+        'end_time',
+        'location'
     ];
 
     protected $casts = [
@@ -31,6 +33,7 @@ class PlannedExam extends Model
         'id_decision_maker' => 'integer',
         'date' => 'date',
         'time' => 'datetime:H:i',
+        'end_time' => 'datetime:H:i',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

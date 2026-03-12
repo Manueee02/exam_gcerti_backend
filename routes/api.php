@@ -25,7 +25,6 @@ use Illuminate\Support\Facades\Route;
 | is assigned the "api" middleware group. Enjoy building your API!
 |
 */
-Route::get('/planned-exams/reference-data', [PlannedExamController::class, 'referenceData']);
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
@@ -144,11 +143,11 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     Route::middleware('role:admin,superAdmin')
         ->prefix('planned-exams')
         ->group(function () {
-/*            Route::get('/planned-exams/reference-data', [PlannedExamController::class, 'referenceData']);*/
-            Route::get('/planned-exams/{id}', [PlannedExamController::class, 'show']);
-            Route::post('/planned-exams', [PlannedExamController::class, 'store']);
-            Route::put('/planned-exams/{id}', [PlannedExamController::class, 'update']);
-            Route::delete('/planned-exams/{id}', [PlannedExamController::class, 'destroy']);
+            Route::get('/reference-data', [PlannedExamController::class, 'referenceData']);
+            Route::get('/show/{id}', [PlannedExamController::class, 'show']);
+            Route::post('/store', [PlannedExamController::class, 'store']);
+            Route::put('/update/{id}', [PlannedExamController::class, 'update']);
+            Route::delete('/destroy/{id}', [PlannedExamController::class, 'destroy']);
         }
     );
     Route::get('/planned-exams', [PlannedExamController::class, 'index']);
