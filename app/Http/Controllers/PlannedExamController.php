@@ -92,6 +92,9 @@ class PlannedExamController extends Controller
                 'organizer' => $examiner
                     ? $examiner['name'] . ' ' . $examiner['surname']
                     : null,
+                'id_exam' => $exam?->id,
+                'id_examiner'=> $plannedExam->id_examiner,
+                'id_decision_maker'=> $plannedExam->id_decision_maker,
             ];
         });
 
