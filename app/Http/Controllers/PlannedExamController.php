@@ -69,7 +69,7 @@ class PlannedExamController extends Controller
                 'title' => $exam?->name,
                 'date' =>  $this->cleanDateTime($plannedExam->date, 'date'),
                 'time' =>  $this->cleanDateTime($plannedExam->time, 'time'),
-                'endTime' =>  $this->cleanDateTime($plannedExam->end_time, 'time'),
+                'end_time' =>  $this->cleanDateTime($plannedExam->end_time, 'time'),
 
                 'color' => $exam?->color,
                 'cost' => $exam?->cost,
