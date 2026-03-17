@@ -4,6 +4,7 @@
 use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\EmailVerificationController;
 use App\Http\Controllers\PlannedExamController;
+use App\Http\Controllers\PlannedExamInscriptionController;
 use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DecisionMakerController;
@@ -144,13 +145,13 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->prefix('planned-exams')
         ->group(function () {
             Route::get('/reference-data', [PlannedExamController::class, 'referenceData']);
-            Route::get('/show/{id}', [PlannedExamController::class, 'show']);
             Route::post('/store', [PlannedExamController::class, 'store']);
             Route::put('/update/{id}', [PlannedExamController::class, 'update']);
             Route::delete('/destroy/{id}', [PlannedExamController::class, 'destroy']);
+            Route::get('/', [PlannedExamController::class, 'index']);
         }
     );
-    Route::get('/planned-exams', [PlannedExamController::class, 'index']);
+    Route::get('/planned-exams/show/{id}', [PlannedExamController::class, 'show']);
 
 
     //Candidati
@@ -173,6 +174,24 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
 
     //Utils
     Route::get('/get-all-data', [CandidateController::class, 'getAllData']);
+
+    //Iscrizioni
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('inscriptions')
+        ->group(function () {
+            Route::get('/', [PlannedExamInscriptionController::class, 'index']);
+            Route::get('/status/{status}', [PlannedExamInscriptionController::class, 'byStatus']);
+            Route::get('/{id}', [PlannedExamInscriptionController::class, 'show']);
+            Route::patch('/{id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
+        }
+    );
+    Route::middleware('role:user')
+        ->prefix('inscriptions')
+        ->group(function () {
+            Route::post('/submit', [PlannedExamInscriptionController::class, 'store']);
+            Route::get('/candidate/{id}', [PlannedExamInscriptionController::class, 'byCandidate']);
+        }
+    );
 
 });
 

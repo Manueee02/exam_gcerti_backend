@@ -6,6 +6,7 @@ use App\Models\Exam;
 use App\Models\PlannedExam;
 use App\Services\ExaminerService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class PlannedExamController extends Controller
 {
@@ -40,58 +41,45 @@ class PlannedExamController extends Controller
             'testCenter',
         ])->get();
 
-        // Fetch esaminatori e decision maker dal service esterno
+        // Fetch esaminatori
         $examinersResponse = $this->examinerService->getExaminers([
             'type'   => 'examiner',
             'status' => 'qualificato',
         ]);
 
-        $decisionMakersResponse = $this->examinerService->getExaminers([
-            'type'   => 'decision_maker',
-            'status' => 'qualificato',
-        ]);
 
-        $examiners = collect($examinersResponse['data'] ?? [])
+        // Collezioni indicizzate per ID
+        $examiners = collect($examinersResponse['data']['data'] ?? [])
             ->keyBy('id');
 
-/*        $decisionMakers = collect($decisionMakersResponse['data'] ?? [])
-            ->keyBy('id');*/
 
-        $result = $plannedExams->map(function ($plannedExam) use ($examiners/*, $decisionMakers*/) {
+        $result = $plannedExams->map(function ($plannedExam) use ($examiners) {
 
             $exam = $plannedExam->exam;
 
+            // 🔹 Recupero corretto tramite ID
             $examiner = $examiners->get($plannedExam->id_examiner);
-/*            $decisionMaker = $decisionMakers->get($plannedExam->id_decision_maker);*/
 
             return [
                 'id' => $plannedExam->id,
                 'title' => $exam?->name,
-                'date' =>  $this->cleanDateTime($plannedExam->date, 'date'),
-                'time' =>  $this->cleanDateTime($plannedExam->time, 'time'),
-                'end_time' =>  $this->cleanDateTime($plannedExam->end_time, 'time'),
+                'date' => $this->cleanDateTime($plannedExam->date, 'date'),
+                'time' => $this->cleanDateTime($plannedExam->time, 'time'),
+                'end_time' => $this->cleanDateTime($plannedExam->end_time, 'time'),
 
                 'color' => $exam?->color,
                 'cost' => $exam?->cost,
                 'tag' => $exam?->type,
 
-                /*'attendees' => collect([
-                    $examiner,
-                    $decisionMaker
-                ])->filter()->map(function ($person) {
-                    return [
-                        'name' => $person['name'] . ' ' . $person['surname'],
-                        'avatar' => strtoupper(substr($person['name'],0,1) . substr($person['surname'],0,1)),
-                        'color' => '#' . substr(md5($person['id']),0,6)
-                    ];
-                })->values(),*/
-
                 'location' => $plannedExam->location,
                 'description' => $exam?->description,
 
+                // 🔹 Organizer = examiner
                 'organizer' => $examiner
                     ? $examiner['name'] . ' ' . $examiner['surname']
                     : null,
+
+
                 'id_exam' => $exam?->id,
                 'id_examiner'=> $plannedExam->id_examiner,
                 'id_decision_maker'=> $plannedExam->id_decision_maker,
@@ -117,24 +105,40 @@ class PlannedExamController extends Controller
             ], 404);
         }
 
-        // Fetch esaminatore e decision maker tramite ID
-        $examinerResponse     = $this->examinerService->getExaminer($plannedExam->id_examiner);
-        $decisionMakerResponse = $this->examinerService->getExaminer($plannedExam->id_decision_maker);
+        $user = Auth::user()?->load('role');
 
-        $examiner = null;
-        if (isset($examinerResponse['data'])) {
-            $e = $examinerResponse['data'];
-            $examiner = ['nome' => $e['nome'], 'cognome' => $e['cognome']];
+        // 🔹 Examiner (sempre)
+        $examinerResponse = $plannedExam->id_examiner
+            ? $this->examinerService->getExaminer($plannedExam->id_examiner)
+            : null;
+
+        // 🔹 Decision maker SOLO per admin / superAdmin
+        $decisionMakerResponse = null;
+        if ($user && in_array($user->role?->name, ['superAdmin', 'admin'])) {
+            $decisionMakerResponse = $plannedExam->id_decision_maker
+                ? $this->examinerService->getExaminer($plannedExam->id_decision_maker)
+                : null;
         }
 
-        $decisionMaker = null;
-        if (isset($decisionMakerResponse['data'])) {
-            $d = $decisionMakerResponse['data'];
-            $decisionMaker = ['nome' => $d['nome'], 'cognome' => $d['cognome']];
-        }
+        // 🔹 Mapper riutilizzabile
+        $mapPerson = function ($response) {
+            if (empty($response['data'])) return null;
 
-        $data                  = $plannedExam->toArray();
-        $data['examiner']      = $examiner;
+            $p = $response['data'];
+
+            return [
+                'id' => $p['id'] ?? null,
+                'name' => $p['name'] ?? null,
+                'surname' => $p['surname'] ?? null,
+                'full_name' => trim(($p['name'] ?? '') . ' ' . ($p['surname'] ?? '')),
+            ];
+        };
+
+        $examiner = $mapPerson($examinerResponse);
+        $decisionMaker = $mapPerson($decisionMakerResponse);
+
+        $data = $plannedExam->toArray();
+        $data['examiner'] = $examiner;
         $data['decision_maker'] = $decisionMaker;
 
         return response()->json($data);

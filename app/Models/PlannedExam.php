@@ -75,4 +75,24 @@ class PlannedExam extends Model
         );
     }
 
+    public function candidates()
+    {
+        return $this->belongsToMany(
+            Candidate::class,
+            'planned_exams_candidates',
+            'id_planned_exam',
+            'id_candidate'
+        )->withTimestamps();
+    }
+
+    public function plannedExamCandidates()
+    {
+        return $this->hasMany(PlannedExamCandidate::class, 'id_planned_exam');
+    }
+
+    public function iscritions()
+    {
+        return $this->hasMany(PlannedExamInscription::class, 'id_planned_exam');
+    }
+
 }
