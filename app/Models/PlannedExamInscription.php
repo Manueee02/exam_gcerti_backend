@@ -13,10 +13,13 @@ class PlannedExamInscription extends Model
 
     protected $fillable = [
         'id_planned_exam',
-        'status',
         'id_candidate',
+        'status',
+        'note',
         'document',
         'invoice',
+        'unsigned_document',
+        'unsigned_invoice',
     ];
 
     protected $casts = [
@@ -45,5 +48,17 @@ class PlannedExamInscription extends Model
     public function candidate()
     {
         return $this->belongsTo(Candidate::class, 'id_candidate');
+    }
+
+    /** Template da firmare caricato dall'admin – documento */
+    public function unsignedDocumentMedia()
+    {
+        return $this->belongsTo(Media::class, 'unsigned_document');
+    }
+
+    /** Template da firmare caricato dall'admin – fattura */
+    public function unsignedInvoiceMedia()
+    {
+        return $this->belongsTo(Media::class, 'unsigned_invoice');
     }
 }

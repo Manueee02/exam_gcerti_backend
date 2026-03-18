@@ -148,9 +148,9 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::post('/store', [PlannedExamController::class, 'store']);
             Route::put('/update/{id}', [PlannedExamController::class, 'update']);
             Route::delete('/destroy/{id}', [PlannedExamController::class, 'destroy']);
-            Route::get('/', [PlannedExamController::class, 'index']);
         }
     );
+    Route::get('planned-exams/', [PlannedExamController::class, 'index']);
     Route::get('/planned-exams/show/{id}', [PlannedExamController::class, 'show']);
 
 
@@ -181,8 +181,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->group(function () {
             Route::get('/', [PlannedExamInscriptionController::class, 'index']);
             Route::get('/status/{status}', [PlannedExamInscriptionController::class, 'byStatus']);
-            Route::get('/{id}', [PlannedExamInscriptionController::class, 'show']);
-            Route::patch('/{id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
+            Route::put('/{id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
         }
     );
     Route::middleware('role:user')
@@ -192,6 +191,8 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::get('/candidate/{id}', [PlannedExamInscriptionController::class, 'byCandidate']);
         }
     );
+    Route::get('inscriptions/show/{id}', [PlannedExamInscriptionController::class, 'show']);
+
 
 });
 

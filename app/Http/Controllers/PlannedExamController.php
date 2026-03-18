@@ -122,9 +122,9 @@ class PlannedExamController extends Controller
 
         // 🔹 Mapper riutilizzabile
         $mapPerson = function ($response) {
-            if (empty($response['data'])) return null;
+            if (empty($response['data']['data']['auditor'])) return null;
 
-            $p = $response['data'];
+            $p = $response['data']['data']['auditor'];
 
             return [
                 'id' => $p['id'] ?? null,

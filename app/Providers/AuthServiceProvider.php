@@ -3,7 +3,9 @@
 namespace App\Providers;
 
 use App\Models\Candidate;
+use App\Models\PlannedExamInscription;
 use App\Policies\CandidatePolicy;
+use App\Policies\PlannedExamInscriptionPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
 
 class AuthServiceProvider extends ServiceProvider
@@ -13,6 +15,7 @@ class AuthServiceProvider extends ServiceProvider
      */
     protected $policies = [
         Candidate::class => CandidatePolicy::class,
+        PlannedExamInscription::class => PlannedExamInscriptionPolicy::class,
     ];
 
     /**
