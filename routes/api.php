@@ -181,7 +181,6 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->group(function () {
             Route::get('/', [PlannedExamInscriptionController::class, 'index']);
             Route::get('/status/{status}', [PlannedExamInscriptionController::class, 'byStatus']);
-            Route::put('/{id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
         }
     );
     Route::middleware('role:user')
@@ -191,6 +190,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::get('/candidate/{id}', [PlannedExamInscriptionController::class, 'byCandidate']);
         }
     );
+    Route::put('inscriptions/{id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
     Route::get('inscriptions/show/{id}', [PlannedExamInscriptionController::class, 'show']);
 
 

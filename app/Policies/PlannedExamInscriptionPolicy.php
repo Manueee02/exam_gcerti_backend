@@ -24,4 +24,9 @@ class PlannedExamInscriptionPolicy
 
         return false;
     }
+
+    public function forceStatusUpdate(User $user, PlannedExamInscription $inscription): bool
+    {
+        return in_array($user->role, ['admin', 'superAdmin'], true);
+    }
 }
