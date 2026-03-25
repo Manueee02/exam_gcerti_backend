@@ -232,7 +232,7 @@ class PlannedExamInscriptionController extends Controller
     {
         return match ($status) {
             'sended'          => 'Richiesta inviata',
-            'waiting_payment' => 'Richiesta approvata – in attesa di pagamento. Trovi i documenti da firmare nella tua area riservata.',
+            'waiting_payment' => 'Richiesta validata – in attesa di pagamento. Trovi i documenti da firmare nella tua area riservata.',
             'sended_payment'  => 'Documenti firmati ricevuti – pagamento in verifica.',
             'approved'        => 'Iscrizione approvata.',
             'revoked'         => 'Iscrizione revocata.',

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nuova Trasferta Creata</title>
+    <title>Aggiornamento sulla tua iscrizione</title>
 </head>
 <body style="font-family: Arial, sans-serif; background-color: #F4F4F4; padding: 20px;">
 
@@ -19,7 +19,7 @@
     <tr>
         <td style="padding: 20px; background-color: #3275E0;">
             <h2 style="color: #FFFFFF; margin: 0; text-align: center;">
-                E' stata richiesta una trasferta
+                Aggiornamento sulla tua iscrizione
             </h2>
         </td>
     </tr>
@@ -27,10 +27,10 @@
     <!-- Contenuto -->
     <tr>
         <td style="padding: 20px; color: #212B36; font-size: 15px; line-height: 1.6;">
-            <p>Ciao,</p>
+            <p>Ciao, {{ $candidate->name }}</p>
 
             <p>
-                Il candidato <strong>{{ $candidate->name }} {{ $candidate->surname }}</strong>
+                Speriamo di trovarti pronto per accedere all'esame. Ecco di seguito un aggiornamento sulla tua iscrizione.
             </p>
 
             <p>
