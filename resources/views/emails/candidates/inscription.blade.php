@@ -19,7 +19,7 @@
     <tr>
         <td style="padding: 20px; background-color: #3275E0;">
             <h2 style="color: #FFFFFF; margin: 0; text-align: center;">
-                Aggiornamento sulla tua iscrizione
+                C'è un aggiornamento per la tua iscrizione
             </h2>
         </td>
     </tr>
@@ -27,11 +27,10 @@
     <!-- Contenuto -->
     <tr>
         <td style="padding: 20px; color: #212B36; font-size: 15px; line-height: 1.6;">
-            <p>Ciao, {{ $candidate->name }}</p>
-
-            <p>
-                Speriamo di trovarti pronto per accedere all'esame. Ecco di seguito un aggiornamento sulla tua iscrizione.
+            <p>Ciao,  <strong>{{ $candidate->name }}</strong>
             </p>
+
+            <p>Speriamo di trovarti bene, qui di seguito trovi un aggiornamento riguardo alla tua iscrizione:</p>
 
             <p>
                 <strong>{{ $statusMessage }}</strong>
