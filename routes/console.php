@@ -10,3 +10,9 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::job(new CleanOrphanMedia(expiryMinutes: 60))->hourly();
+
+Schedule::command('logs:clean --days=15')
+    ->dailyAt('02:00')
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/clean-logs.log'));
