@@ -226,6 +226,15 @@ class PlannedExamInscriptionController extends Controller
             }
 
             $inscription->status = $request->status;
+
+            // ── retired: rimuove il candidato dall'esame se era già approvato ─────────
+            if (($request->status === 'retired' || $request->status === 'revoked') && $inscription->status === 'approved') {
+                PlannedExamCandidate::where([
+                    'id_candidate'    => $inscription->id_candidate,
+                    'id_planned_exam' => $inscription->id_planned_exam,
+                ])->delete();
+            }
+
             $inscription->save();
 
             $this->sendMail($inscription, $isForced);
@@ -276,7 +285,7 @@ class PlannedExamInscriptionController extends Controller
             'sended'          => ['waiting_payment', 'revoked', 'retired'],
             'waiting_payment' => ['sended_payment',  'revoked', 'retired'],
             'sended_payment'  => ['approved',         'revoked', 'retired'],
-            'approved'        => [],
+            'approved'        => ['retired', 'revoked'],
             'revoked'         => [],
             'retired'         => [],
         ];
