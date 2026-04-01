@@ -66,6 +66,11 @@ class User extends Authenticatable implements JWTSubject
         return $this->belongsTo(UserRole::class, 'id_role');
     }
 
+    public function mailNotifications()
+    {
+        return $this->hasMany(AdminMailNotification::class, 'id_user');
+    }
+
 
     /**
      * Return a key value array, containing any custom claims to be added to the JWT.
