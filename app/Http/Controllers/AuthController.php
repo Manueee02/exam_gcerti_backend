@@ -199,7 +199,7 @@ class AuthController extends Controller
     protected function formatUserData($user)
     {
         return [
-            'id' => $user->id,
+            'public_id' => $user->public_id,
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role ? $user->role->name : 'user',
@@ -208,7 +208,7 @@ class AuthController extends Controller
             'updated_at' => $user->updated_at,
             'first_access' => $user->first_access,
             'candidate_registration_completed' => $user->candidate_registration_completed,
-            'id_candidate' => optional($user->candidate)->id,
+            'id_candidate' => optional($user->candidate)->public_id,
 
         ];
     }
@@ -246,7 +246,7 @@ class AuthController extends Controller
 
         $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
-            'email' => ['sometimes', 'string', 'email', 'max:255', 'unique:users,email,' . $user->id],
+            'email' => ['sometimes', 'string', 'email', 'max:255', 'unique:users,email,' . $user->public_id],
             // Aggiungi altre validazioni per i campi che vuoi permettere di aggiornare
         ]);
 

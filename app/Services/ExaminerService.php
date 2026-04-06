@@ -6,10 +6,10 @@ use Illuminate\Support\Facades\Http;
 
 class ExaminerService
 {
-    public function getExaminer($id)
+    public function getExaminer($publicId)
     {
         $response = Http::withToken(config('services.app1.token'))
-            ->get(config('services.app1.url') . '/examiner/' . $id);
+            ->get(config('services.app1.url') . '/examiner/' . $publicId);
 
         return [
             'status' => $response->getStatusCode(),

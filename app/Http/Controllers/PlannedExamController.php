@@ -17,16 +17,16 @@ class PlannedExamController extends Controller
         $this->examinerService = $examinerService;
     }
 
-     private function cleanDateTime(string $value, string $type = 'date'): string {
-        // Controlla se è un valore valido
+    private function cleanDateTime(string $value, string $type = 'date'): string
+    {
         if (empty($value)) return '';
 
         $timestamp = strtotime($value);
 
         if ($type === 'date') {
-            return date('Y-m-d', $timestamp); // formato 2026-03-12
+            return date('Y-m-d', $timestamp);
         } elseif ($type === 'time') {
-            return date('H:i', $timestamp);   // formato 16:00
+            return date('H:i', $timestamp);
         }
 
         return $value;
@@ -41,48 +41,44 @@ class PlannedExamController extends Controller
             'testCenter',
         ])->get();
 
-        // Fetch esaminatori
         $examinersResponse = $this->examinerService->getExaminers([
             'type'   => 'examiner',
             'status' => 'qualificato',
         ]);
 
-
-        // Collezioni indicizzate per ID
         $examiners = collect($examinersResponse['data']['data'] ?? [])
             ->keyBy('id');
 
-
         $result = $plannedExams->map(function ($plannedExam) use ($examiners) {
-
-            $exam = $plannedExam->exam;
-
-            // 🔹 Recupero corretto tramite ID
+            $exam     = $plannedExam->exam;
             $examiner = $examiners->get($plannedExam->id_examiner);
 
             return [
-                'id' => $plannedExam->id,
-                'title' => $exam?->name,
-                'date' => $this->cleanDateTime($plannedExam->date, 'date'),
-                'time' => $this->cleanDateTime($plannedExam->time, 'time'),
-                'end_time' => $this->cleanDateTime($plannedExam->end_time, 'time'),
-
-                'color' => $exam?->color,
-                'cost' => $exam?->cost,
-                'tag' => $exam?->type,
-
-                'location' => $plannedExam->location,
+                'public_id'   => $plannedExam->public_id,
+                'title'       => $exam?->name,
+                'date'        => $this->cleanDateTime($plannedExam->date, 'date'),
+                'time'        => $this->cleanDateTime($plannedExam->time, 'time'),
+                'end_time'    => $this->cleanDateTime($plannedExam->end_time, 'time'),
+                'color'       => $exam?->color,
+                'cost'        => $exam?->cost,
+                'tag'         => $exam?->type,
+                'location'    => $plannedExam->location,
                 'description' => $exam?->description,
-
-                // 🔹 Organizer = examiner
-                'organizer' => $examiner
-                    ? $examiner['name'] . ' ' . $examiner['surname']
+                'organizer'   => $examiner
+                    ? [
+                        'name'      => $examiner['name'] . ' ' . $examiner['surname'],
+                        'public_id' => $examiner['public_id'] ?? null,
+                    ]
                     : null,
-
-
-                'id_exam' => $exam?->id,
-                'id_examiner'=> $plannedExam->id_examiner,
-                'id_decision_maker'=> $plannedExam->id_decision_maker,
+                'exam' => [
+                    'public_id' => $exam?->public_id ?? null,
+                ],
+                'examiner' => [
+                    'public_id' => $plannedExam->examiner?->public_id ?? null,
+                ],
+                'decision_maker' => [
+                    'public_id' => $plannedExam->decisionMaker?->public_id ?? null,
+                ],
             ];
         });
 
@@ -90,29 +86,27 @@ class PlannedExamController extends Controller
     }
 
 
-    // GET /api/planned-exams/{id}
-    public function show($id)
+    // GET /api/planned-exams/{publicId}
+    public function show(string $publicId)
     {
         $plannedExam = PlannedExam::with([
             'exam',
             'testCenter',
-            'candidateExams'
-        ])->find($id);
+            'candidateExams',
+        ])->where('public_id', $publicId)->first();
 
         if (!$plannedExam) {
             return response()->json([
-                'message' => 'Sessione d\'esame non trovata'
+                'message' => 'Sessione d\'esame non trovata',
             ], 404);
         }
 
         $user = Auth::user()?->load('role');
 
-        // 🔹 Examiner (sempre)
         $examinerResponse = $plannedExam->id_examiner
             ? $this->examinerService->getExaminer($plannedExam->id_examiner)
             : null;
 
-        // 🔹 Decision maker SOLO per admin / superAdmin
         $decisionMakerResponse = null;
         if ($user && in_array($user->role?->name, ['superAdmin', 'admin'])) {
             $decisionMakerResponse = $plannedExam->id_decision_maker
@@ -120,26 +114,22 @@ class PlannedExamController extends Controller
                 : null;
         }
 
-        // 🔹 Mapper riutilizzabile
         $mapPerson = function ($response) {
             if (empty($response['data']['data']['auditor'])) return null;
 
             $p = $response['data']['data']['auditor'];
 
             return [
-                'id' => $p['id'] ?? null,
-                'name' => $p['name'] ?? null,
-                'surname' => $p['surname'] ?? null,
+                'public_id'        => $p['public_id'] ?? null,
+                'name'      => $p['name'] ?? null,
+                'surname'   => $p['surname'] ?? null,
                 'full_name' => trim(($p['name'] ?? '') . ' ' . ($p['surname'] ?? '')),
             ];
         };
 
-        $examiner = $mapPerson($examinerResponse);
-        $decisionMaker = $mapPerson($decisionMakerResponse);
-
-        $data = $plannedExam->toArray();
-        $data['examiner'] = $examiner;
-        $data['decision_maker'] = $decisionMaker;
+        $data                   = $plannedExam->toArray();
+        $data['examiner']       = $mapPerson($examinerResponse);
+        $data['decision_maker'] = $mapPerson($decisionMakerResponse);
 
         return response()->json($data);
     }
@@ -149,83 +139,130 @@ class PlannedExamController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'id_exam'           => 'required|integer',
-            'id_examiner'       => 'required|integer',
-            'id_decision_maker' => 'required|integer',
+            'id_exam'           => 'required|string',
+            'id_examiner'       => 'required|string',
+            'id_decision_maker' => 'required|string',
             'date'              => 'required|date',
             'time'              => 'required',
-            'end_time'              => 'required'
+            'end_time'          => 'required',
         ]);
 
-        $plannedExam = PlannedExam::create($validated);
+        // Risolvi public_id → id reale per l'esame
+        $exam = Exam::where('public_id', $validated['id_exam'])->first();
+        if (!$exam) {
+            return response()->json(['message' => 'Esame non trovato'], 404);
+        }
+
+        // Per examiner e decision_maker chiami il servizio esterno
+        $examinerData       = $this->examinerService->getExaminer($validated['id_examiner']);
+        $decisionMakerData  = $this->examinerService->getExaminer($validated['id_decision_maker']);
+
+        $examinerId       = $examinerData['data']['data']['auditor']['id']       ?? null;
+        $decisionMakerId  = $decisionMakerData['data']['data']['auditor']['id']  ?? null;
+
+        if (!$examinerId || !$decisionMakerId) {
+            return response()->json(['message' => 'Esaminatore o decision maker non trovato'], 404);
+        }
+
+        $plannedExam = PlannedExam::create([
+            'id_exam'           => $exam->id,
+            'id_examiner'       => $examinerId,
+            'id_decision_maker' => $decisionMakerId,
+            'date'              => $validated['date'],
+            'time'              => $validated['time'],
+            'end_time'          => $validated['end_time'],
+        ]);
 
         return response()->json([
             'message' => 'Sessione d\'esame creata',
-            'data'    => $plannedExam
+            'data'    => $plannedExam,
         ], 201);
     }
 
 
-    // PUT /api/planned-exams/{id}
-    public function update(Request $request, $id)
+    // PUT /api/planned-exams/{publicId}
+    public function update(Request $request, string $publicId)
     {
-        $plannedExam = PlannedExam::find($id);
+        $plannedExam = PlannedExam::where('public_id', $publicId)->first();
 
         if (!$plannedExam) {
-            return response()->json([
-                'message' => 'Sessione d\'esame non trovata'
-            ], 404);
+            return response()->json(['message' => 'Sessione d\'esame non trovata'], 404);
         }
 
         $validated = $request->validate([
-            'id_exam'           => 'sometimes|integer',
-            'id_test_center'    => 'sometimes|integer',
-            'id_examiner'       => 'sometimes|integer',
-            'id_decision_maker' => 'sometimes|integer',
+            'id_exam'           => 'sometimes|string',
+            'id_examiner'       => 'sometimes|string',
+            'id_decision_maker' => 'sometimes|string',
             'date'              => 'sometimes|date',
-            'time'              => 'sometimes'
+            'time'              => 'sometimes',
+            'end_time'          => 'sometimes',
         ]);
 
-        $plannedExam->update($validated);
+        $toUpdate = array_filter([
+            'date'     => $validated['date']     ?? null,
+            'time'     => $validated['time']     ?? null,
+            'end_time' => $validated['end_time'] ?? null,
+        ], fn($v) => $v !== null);
+
+        if (isset($validated['id_exam'])) {
+            $exam = Exam::where('public_id', $validated['id_exam'])->first();
+            if (!$exam) return response()->json(['message' => 'Esame non trovato'], 404);
+            $toUpdate['id_exam'] = $exam->id;
+        }
+
+        if (isset($validated['id_examiner'])) {
+            $data = $this->examinerService->getExaminer($validated['id_examiner']);
+            $id   = $data['data']['data']['auditor']['id'] ?? null;
+            if (!$id) return response()->json(['message' => 'Esaminatore non trovato'], 404);
+            $toUpdate['id_examiner'] = $id;
+        }
+
+        if (isset($validated['id_decision_maker'])) {
+            $data = $this->examinerService->getExaminer($validated['id_decision_maker']);
+            $id   = $data['data']['data']['auditor']['id'] ?? null;
+            if (!$id) return response()->json(['message' => 'Decision maker non trovato'], 404);
+            $toUpdate['id_decision_maker'] = $id;
+        }
+
+        $plannedExam->update($toUpdate);
 
         return response()->json([
             'message' => 'Sessione d\'esame aggiornata',
-            'data'    => $plannedExam
+            'data'    => $plannedExam,
         ]);
     }
 
 
-    // DELETE /api/planned-exams/{id}
-    public function destroy($id)
+    // DELETE /api/planned-exams/{publicId}
+    public function destroy(string $publicId)
     {
-        $plannedExam = PlannedExam::find($id);
+        $plannedExam = PlannedExam::where('public_id', $publicId)->first();
 
         if (!$plannedExam) {
             return response()->json([
-                'message' => 'Sessione d\'esame non trovata'
+                'message' => 'Sessione d\'esame non trovata',
             ], 404);
         }
 
         if ($plannedExam->candidateExams()->exists()) {
             return response()->json([
-                'message' => 'Impossibile eliminare la sessione: ci sono candidati iscritti'
+                'message' => 'Impossibile eliminare la sessione: ci sono candidati iscritti',
             ], 400);
         }
 
         $plannedExam->delete();
 
         return response()->json([
-            'message' => 'Sessione d\'esame eliminata'
+            'message' => 'Sessione d\'esame eliminata',
         ]);
     }
+
 
     // GET /api/planned-exams/reference-data
     public function referenceData()
     {
-        // Esami dal DB locale
         $exams = Exam::all();
 
-        // Esaminatori dal service esterno
         $examinersResponse = $this->examinerService->getExaminers([
             'type'   => 'examiner',
             'status' => 'qualificato',
@@ -233,13 +270,12 @@ class PlannedExamController extends Controller
 
         $examiners = collect($examinersResponse['data']['data'] ?? [])
             ->map(fn($e) => [
-                'id'      => $e['id'],
-                'name'    => $e['name'],
-                'surname' => $e['surname'],
+                'public_id' => $e['public_id'] ?? null,
+                'name'      => $e['name'],
+                'surname'   => $e['surname'],
             ])
             ->values();
 
-        // Decision maker dal service esterno
         $decisionMakersResponse = $this->examinerService->getExaminers([
             'type'   => 'decision_maker',
             'status' => 'qualificato',
@@ -247,15 +283,15 @@ class PlannedExamController extends Controller
 
         $decisionMakers = collect($decisionMakersResponse['data']['data'] ?? [])
             ->map(fn($e) => [
-                'id'      => $e['id'],
-                'name'    => $e['name'],
-                'surname' => $e['surname'],
+                'public_id' => $e['public_id'] ?? null,
+                'name'      => $e['name'],
+                'surname'   => $e['surname'],
             ])
             ->values();
 
         return response()->json([
-            'exams'          => $exams,
-            'examiners'      => $examiners,
+            'exams'           => $exams,
+            'examiners'       => $examiners,
             'decision_makers' => $decisionMakers,
         ]);
     }

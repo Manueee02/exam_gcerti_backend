@@ -80,8 +80,8 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->group(function () {
             Route::get('/users', [UserController::class, 'index']);
             Route::get('/users-roles', [UserController::class, 'indexRoles']);
-            Route::put('/change-role-users/{id}', [UserController::class, 'updateRole']);
-            Route::delete('/users/{id}', [UserController::class, 'destroy']);
+            Route::put('/change-role-users/{public_id}', [UserController::class, 'updateRole']);
+            Route::delete('/users/{public_id}', [UserController::class, 'destroy']);
             Route::post('/create-user', [UserController::class, 'store']);
         }
     );
@@ -146,12 +146,12 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->group(function () {
             Route::get('/reference-data', [PlannedExamController::class, 'referenceData']);
             Route::post('/store', [PlannedExamController::class, 'store']);
-            Route::put('/update/{id}', [PlannedExamController::class, 'update']);
-            Route::delete('/destroy/{id}', [PlannedExamController::class, 'destroy']);
+            Route::put('/update/{public_id}', [PlannedExamController::class, 'update']);
+            Route::delete('/destroy/{public_id}', [PlannedExamController::class, 'destroy']);
         }
     );
     Route::get('planned-exams/', [PlannedExamController::class, 'index']);
-    Route::get('/planned-exams/show/{id}', [PlannedExamController::class, 'show']);
+    Route::get('/planned-exams/show/{public_id}', [PlannedExamController::class, 'show']);
 
 
     //Candidati
@@ -159,7 +159,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->prefix('candidates')
         ->group(function () {
             Route::post('/store', [CandidateController::class, 'store']);
-            Route::put('/update/{id}', [CandidateController::class, 'update']);
+            Route::put('/update/{public_id}', [CandidateController::class, 'update']);
 
         }
     );
@@ -167,10 +167,10 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->prefix('candidates')
         ->group(function () {
             Route::get('/all', [CandidateController::class, 'index']);
-            Route::put('/delete/{id}', [CandidateController::class, 'delete']);
+            Route::put('/delete/{public_id}', [CandidateController::class, 'delete']);
         }
     );
-    Route::get('candidates/{id}', [CandidateController::class, 'show']);
+    Route::get('candidates/{public_id}', [CandidateController::class, 'show']);
 
     //Utils
     Route::get('/get-all-data', [CandidateController::class, 'getAllData']);
@@ -187,11 +187,11 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->prefix('inscriptions')
         ->group(function () {
             Route::post('/submit', [PlannedExamInscriptionController::class, 'store']);
-            Route::get('/candidate/{id}', [PlannedExamInscriptionController::class, 'byCandidate']);
+            Route::get('/candidate/{public_id}', [PlannedExamInscriptionController::class, 'byCandidate']);
         }
     );
-    Route::put('inscriptions/{id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
-    Route::get('inscriptions/show/{id}', [PlannedExamInscriptionController::class, 'show']);
+    Route::put('inscriptions/{public_id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
+    Route::get('inscriptions/show/{public_id}', [PlannedExamInscriptionController::class, 'show']);
 
 
 });

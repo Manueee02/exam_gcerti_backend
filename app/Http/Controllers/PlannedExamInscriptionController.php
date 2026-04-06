@@ -29,12 +29,12 @@ class PlannedExamInscriptionController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'id_planned_exam' => 'required|exists:planned_exams,id',
-            'id_candidate'    => 'required|exists:candidates,id',
+            'planned_exam_public_id' => 'required|exists:planned_exams,public_id',
+            'candidate_public_id'    => 'required|exists:candidates,public_id',
         ]);
 
-        // Recupero esame pianificato
-        $plannedExam = PlannedExam::findOrFail($request->id_planned_exam);
+        $plannedExam = PlannedExam::where('public_id', $request->planned_exam_public_id)->firstOrFail();
+        $candidate   = \App\Models\Candidate::where('public_id', $request->candidate_public_id)->firstOrFail();
 
         // 1️⃣ Controllo data (non oggi o passato)
         if (Carbon::parse($plannedExam->date)->startOfDay() <= Carbon::today()) {
@@ -44,11 +44,11 @@ class PlannedExamInscriptionController extends Controller
         }
 
         // 2️⃣ Controllo iscrizione alla stessa tipologia esame
-        $alreadySubscribed = PlannedExamInscription::where('id_candidate', $request->id_candidate)
+        $alreadySubscribed = PlannedExamInscription::where('id_candidate', $candidate->id)
             ->whereHas('plannedExam', function ($query) use ($plannedExam) {
-                $query->where('id_exam', $plannedExam->id_exam); // stessa tipologia d'esame
+                $query->where('id_exam', $plannedExam->id_exam);
             })
-            ->whereNotIn('status', ['retired', 'revoked']) // escludo iscrizioni "chiuse"
+            ->whereNotIn('status', ['retired', 'revoked'])
             ->exists();
 
         if ($alreadySubscribed) {
@@ -59,8 +59,8 @@ class PlannedExamInscriptionController extends Controller
 
         // 3️⃣ Controllo duplicato esatto sulla stessa sessione
         $exists = PlannedExamInscription::where([
-            'id_planned_exam' => $request->id_planned_exam,
-            'id_candidate'    => $request->id_candidate,
+            'id_planned_exam' => $plannedExam->id,
+            'id_candidate'    => $candidate->id,
         ])
             ->whereNotIn('status', ['retired', 'revoked'])
             ->exists();
@@ -71,12 +71,11 @@ class PlannedExamInscriptionController extends Controller
 
         // ✅ Creazione iscrizione
         $inscription = PlannedExamInscription::create([
-            'id_planned_exam' => $request->id_planned_exam,
-            'id_candidate'    => $request->id_candidate,
+            'id_planned_exam' => $plannedExam->id,
+            'id_candidate'    => $candidate->id,
             'status'          => 'sended',
         ]);
 
-        // Invio email
         $this->sendCandidateMail($inscription);
         $this->sendAdminMail($inscription);
 
@@ -94,14 +93,16 @@ class PlannedExamInscriptionController extends Controller
     /**
      * ISCRIZIONI PER CANDIDATO
      */
-    public function byCandidate($id)
+    public function byCandidate(string $publicId)
     {
+        $candidate = \App\Models\Candidate::where('public_id', $publicId)->firstOrFail();
+
         return PlannedExamInscription::with([
             'plannedExam',
             'plannedExam.exam',
             'plannedExam.testCenter',
         ])
-            ->where('id_candidate', $id)
+            ->where('id_candidate', $candidate->id)
             ->orderBy('created_at', 'desc')
             ->get();
     }
@@ -109,7 +110,7 @@ class PlannedExamInscriptionController extends Controller
     /**
      * FILTRO PER STATUS
      */
-    public function byStatus($status)
+    public function byStatus(string $status)
     {
         return PlannedExamInscription::with(['plannedExam', 'candidate', 'plannedExam.exam'])
             ->where('status', $status)
@@ -119,7 +120,7 @@ class PlannedExamInscriptionController extends Controller
     /**
      * DETTAGLIO
      */
-    public function show($id)
+    public function show(string $publicId)
     {
         $inscription = PlannedExamInscription::with([
             'plannedExam',
@@ -131,7 +132,7 @@ class PlannedExamInscriptionController extends Controller
             'invoiceMedia',
             'unsignedDocumentMedia',
             'unsignedInvoiceMedia',
-        ])->findOrFail($id);
+        ])->where('public_id', $publicId)->firstOrFail();
 
         $this->authorize('view', $inscription);
 
@@ -140,25 +141,8 @@ class PlannedExamInscriptionController extends Controller
 
     /**
      * CAMBIO STATUS
-     *
-     * Autorizzazioni:
-     *  - admin / superAdmin → tutte le transizioni, supporta force=true
-     *  - user (candidato)   → solo retired e sended_payment sul proprio candidato
-     *
-     * Flusso normale (state machine):
-     *  sended            → waiting_payment  (admin, richiede unsigned_document + unsigned_invoice)
-     *  sended            → revoked          (admin, richiede note)
-     *  sended            → retired          (candidato)
-     *  waiting_payment   → sended_payment   (candidato, richiede document + invoice)
-     *  waiting_payment   → revoked          (admin, richiede note)
-     *  waiting_payment   → retired          (candidato)
-     *  sended_payment    → approved         (admin)
-     *  sended_payment    → revoked          (admin, richiede note)
-     *  sended_payment    → retired          (candidato)
-     *  approved          → retired          (candidato / admin)
-     *  approved          → revoked          (admin, richiede note)
      */
-    public function updateStatus(Request $request, $id)
+    public function updateStatus(Request $request, string $publicId)
     {
         $request->validate([
             'status'            => 'required|in:revoked,sended,waiting_payment,sended_payment,approved,retired',
@@ -170,16 +154,16 @@ class PlannedExamInscriptionController extends Controller
             'force'             => 'nullable|boolean',
         ]);
 
-        $inscription = PlannedExamInscription::with('candidate')->findOrFail($id);
+        $inscription = PlannedExamInscription::with('candidate')
+            ->where('public_id', $publicId)
+            ->firstOrFail();
 
         // ── Autorizzazione ────────────────────────────────────────────────────────
         $user = $request->user();
         $user->loadMissing('role');
         $isAdmin = in_array($user->role->name, ['admin', 'superAdmin']);
 
-        if ($isAdmin) {
-            // Gli admin possono operare su qualsiasi iscrizione — nessun check aggiuntivo
-        } else {
+        if (!$isAdmin) {
             $this->authorize('view', $inscription->candidate);
 
             $allowedForUser = ['retired', 'sended_payment'];
@@ -196,27 +180,22 @@ class PlannedExamInscriptionController extends Controller
         try {
             $isForced = $isAdmin && (bool) $request->input('force', false);
 
-            // Stato retired: nessuna modifica consentita, nemmeno con force
             if ($inscription->status === 'retired') {
                 throw new \Exception('Impossibile modificare un\'iscrizione ritirata.');
             }
 
-            // ── sended: pulisce tutti i media collegati ───────────────────────────
             if ($request->status === 'sended') {
                 $this->clearInscriptionMedia($inscription);
             }
 
-            // ── approved / retired / revoked: pulisce i template non firmati ──────
             if (in_array($request->status, ['approved', 'retired', 'revoked'])) {
                 $this->clearUnsignedMedia($inscription);
             }
 
-            // Validazione transizione — saltata se force === true
             if (!$isForced) {
                 $this->validateStatusTransition($inscription->status, $request->status);
             }
 
-            // ── waiting_payment: l'admin carica i template da far firmare ─────────
             if ($request->status === 'waiting_payment') {
                 if (!$isForced && (empty($request->unsigned_document) || empty($request->unsigned_invoice))) {
                     throw new \Exception(
@@ -231,7 +210,6 @@ class PlannedExamInscriptionController extends Controller
                 }
             }
 
-            // ── sended_payment: il candidato carica i file firmati ────────────────
             if ($request->status === 'sended_payment') {
                 if (!$isForced && (empty($request->document) || empty($request->invoice))) {
                     throw new \Exception(
@@ -246,7 +224,6 @@ class PlannedExamInscriptionController extends Controller
                 }
             }
 
-            // ── revoked: note obbligatorie ────────────────────────────────────────
             if ($request->status === 'revoked') {
                 if (empty($request->note)) {
                     throw new \Exception('La motivazione (note) è obbligatoria per revocare un\'iscrizione.');
@@ -254,12 +231,9 @@ class PlannedExamInscriptionController extends Controller
                 $inscription->note = $request->note;
             }
 
-            // Salvo il vecchio status prima di aggiornarlo (serve per il check del candidato)
-            $previousStatus = $inscription->status;
-
+            $previousStatus    = $inscription->status;
             $inscription->status = $request->status;
 
-            // ── approved: crea il record candidato nell'esame ─────────────────────
             if ($request->status === 'approved') {
                 PlannedExamCandidate::firstOrCreate([
                     'id_candidate'    => $inscription->id_candidate,
@@ -267,7 +241,6 @@ class PlannedExamInscriptionController extends Controller
                 ]);
             }
 
-            // ── retired / revoked: rimuove il candidato dall'esame se era approved ─
             if (in_array($request->status, ['retired', 'revoked']) && $previousStatus === 'approved') {
                 PlannedExamCandidate::where([
                     'id_candidate'    => $inscription->id_candidate,
@@ -277,10 +250,8 @@ class PlannedExamInscriptionController extends Controller
 
             $inscription->save();
 
-            // ── Mail ──────────────────────────────────────────────────────────────
             $this->sendCandidateMail($inscription, $isForced);
 
-            // Notifica admin solo su nuovi pagamenti inviati
             if ($request->status === 'sended_payment') {
                 $this->sendAdminMail($inscription, $isForced);
             }
@@ -304,13 +275,11 @@ class PlannedExamInscriptionController extends Controller
     }
 
     /**
-     * ELIMINA TUTTI I MEDIA COLLEGATI ALL'ISCRIZIONE (reset completo verso sended)
+     * ELIMINA TUTTI I MEDIA COLLEGATI ALL'ISCRIZIONE
      */
     private function clearInscriptionMedia(PlannedExamInscription $inscription): void
     {
-        $fields = ['document', 'invoice', 'unsigned_document', 'unsigned_invoice'];
-
-        foreach ($fields as $field) {
+        foreach (['document', 'invoice', 'unsigned_document', 'unsigned_invoice'] as $field) {
             $mediaId = $inscription->{$field};
             if ($mediaId) {
                 $this->mediaService->deleteMedia((int) $mediaId);
@@ -320,14 +289,11 @@ class PlannedExamInscriptionController extends Controller
     }
 
     /**
-     * ELIMINA SOLO I TEMPLATE NON FIRMATI (usato su approved / retired / revoked)
-     * I documenti firmati (document, invoice) vengono conservati come storico.
+     * ELIMINA SOLO I TEMPLATE NON FIRMATI
      */
     private function clearUnsignedMedia(PlannedExamInscription $inscription): void
     {
-        $fields = ['unsigned_document', 'unsigned_invoice'];
-
-        foreach ($fields as $field) {
+        foreach (['unsigned_document', 'unsigned_invoice'] as $field) {
             $mediaId = $inscription->{$field};
             if ($mediaId) {
                 $this->mediaService->deleteMedia((int) $mediaId);
@@ -368,15 +334,12 @@ class PlannedExamInscriptionController extends Controller
 
     /**
      * MAIL AGLI ADMIN
-     * Viene inviata solo agli admin con notifica "inscriptions" attiva.
      */
     private function sendAdminMail(PlannedExamInscription $inscription, bool $isOverride = false): void
     {
         $admins = $this->userService->getAdminUsersByNotificationType('inscriptions');
 
-        if ($admins->isEmpty()) {
-            return;
-        }
+        if ($admins->isEmpty()) return;
 
         $payload = $this->getAdminMailPayload($inscription->status, $isOverride);
 
@@ -388,8 +351,6 @@ class PlannedExamInscriptionController extends Controller
 
     /**
      * CONTENUTO MAIL CANDIDATO PER OGNI STATO
-     *
-     * Ritorna: [ 'subject' => ..., 'title' => ..., 'body' => ... ]
      */
     private function getCandidateMailPayload(string $status, bool $isOverride = false): array
     {
@@ -402,12 +363,12 @@ class PlannedExamInscriptionController extends Controller
                 ],
                 'waiting_payment' => [
                     'subject' => 'Documenti aggiornati – attesa pagamento',
-                    'title'   => 'Iscrizione reimpostata in attesa di pagamento,',
+                    'title'   => 'Iscrizione reimpostata in attesa di pagamento',
                     'body'    => 'La tua iscrizione è stata reimpostata in attesa di pagamento da un amministratore. I documenti aggiornati sono disponibili nella tua area riservata. Scaricali, firmali e carica i file richiesti per procedere.',
                 ],
                 'sended_payment' => [
                     'subject' => 'Pagamento reimpostato dall\'amministratore',
-                    'title'   => 'Iscrizione reimpostata a pagamento inviato,',
+                    'title'   => 'Iscrizione reimpostata a pagamento inviato',
                     'body'    => 'La tua iscrizione è stata reimpostata allo stato "pagamento inviato" da un amministratore. Puoi accedere alla piattaforma per ulteriori informazioni.',
                 ],
                 'revoked' => [
@@ -464,8 +425,6 @@ class PlannedExamInscriptionController extends Controller
 
     /**
      * CONTENUTO MAIL ADMIN PER OGNI STATO
-     *
-     * Ritorna: [ 'subject' => ..., 'title' => ..., 'body' => ... ]
      */
     private function getAdminMailPayload(string $status, bool $isOverride = false): array
     {
