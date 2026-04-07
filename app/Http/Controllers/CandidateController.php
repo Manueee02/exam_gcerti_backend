@@ -194,16 +194,39 @@ class CandidateController extends Controller
     public function index(): \Illuminate\Http\JsonResponse
     {
         try {
-            $candidates = Candidate::with([
-                'user',
-                'companies',
-                'media.media'
-            ])->where('active', "true")->get();
+            $candidates = Candidate::where('active', "true")->get();
+
+            // Mappiamo i dati dei candidati
+            $mappedCandidates = $candidates->map(function ($candidate) {
+                return [
+                    'public_id'         => $candidate->public_id,
+                    'name'              => $candidate->name,
+                    'surname'           => $candidate->surname,
+                    'email'             => $candidate->email,
+                    'phone'             => $candidate->phone,
+                    'sex'               => $candidate->sex,
+                    'birthdate'         => $candidate->birthdate,
+                    'birthplace'        => $candidate->birthplace,
+                    'birthprovince'     => $candidate->birthprovince,
+                    'birthcommun'       => $candidate->birthcommun,
+                    'birthcountry'      => $candidate->birthcountry,
+                    'residence_address' => $candidate->residence_address,
+                    'residence_city'    => $candidate->residence_city,
+                    'residence_province'=> $candidate->residence_province,
+                    'residence_country' => $candidate->residence_country,
+                    'residence_zip'     => $candidate->residence_zip,
+                    'fiscal_code'       => $candidate->fiscal_code,
+                    'is_foreign'        => $candidate->is_foreign,
+                    'active'            => $candidate->active,
+                    'created_at'        => $candidate->created_at,
+                    'updated_at'        => $candidate->updated_at,
+                ];
+            });
 
             return response()->json([
                 'success'    => true,
-                'count'      => $candidates->count(),
-                'candidates' => $candidates
+                'count'      => $mappedCandidates->count(),
+                'candidates' => $mappedCandidates
             ], 200);
 
         } catch (\Throwable $e) {
@@ -217,23 +240,58 @@ class CandidateController extends Controller
     // =========================================================================
     // SHOW - GET SINGLE CANDIDATE BY ID
     // =========================================================================
-    public function show(int $id): \Illuminate\Http\JsonResponse
+    public function show(string $id): \Illuminate\Http\JsonResponse
     {
         try {
             // Carica relazioni aggiuntive
-            $candidate = Candidate::with(['user','companies','media.media'])
-                ->findOrFail($id);
+            $candidate = Candidate::with(['companies','media.media'])
+                ->where('public_id', $id)->firstOrFail();
 
             // 🔒 Controllo autorizzazione tramite Policy
             $this->authorize('view', $candidate);
 
+            // Mappiamo i dati del candidato
+            $mappedCandidate = [
+                'public_id'         => $candidate->public_id,
+                'name'              => $candidate->name,
+                'surname'           => $candidate->surname,
+                'email'             => $candidate->email,
+                'phone'             => $candidate->phone,
+                'sex'               => $candidate->sex,
+                'birthdate'         => $candidate->birthdate,
+                'birthplace'        => $candidate->birthplace,
+                'birthprovince'     => $candidate->birthprovince,
+                'birthcommun'       => $candidate->birthcommun,
+                'birthcountry'      => $candidate->birthcountry,
+                'residence_address' => $candidate->residence_address,
+                'residence_city'    => $candidate->residence_city,
+                'residence_province'=> $candidate->residence_province,
+                'residence_country' => $candidate->residence_country,
+                'residence_zip'     => $candidate->residence_zip,
+                'fiscal_code'       => $candidate->fiscal_code,
+                'is_foreign'        => $candidate->is_foreign,
+                'active'            => $candidate->active,
+                'companies'         => $candidate->companies->map(function ($company) {
+                    return [
+                        'id_candidates'=> $company->id_candidates,
+                        'billing_type' => $company->billing_type,
+                        'piva'         => $company->piva,
+                        'company_piva' => $company->company_piva,
+                        'created_at'   => $company->created_at,
+                        'updated_at'   => $company->updated_at,
+                    ];
+                }),
+                'media'             => $candidate->media,
+                'created_at'        => $candidate->created_at,
+                'updated_at'        => $candidate->updated_at,
+            ];
+
             return response()->json([
                 'success' => true,
-                'candidate' => $candidate
+                'candidate' => $mappedCandidate
             ], 200);
 
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
-            // Se l'utente non è autorizzato
             return response()->json([
                 'success' => false,
                 'message' => 'Non autorizzato a visualizzare questo candidato.'
@@ -346,7 +404,9 @@ class CandidateController extends Controller
             return response()->json([
                 'success'   => true,
                 'message'   => 'Candidato creato con successo.',
-                'candidate' => $candidate->load(['user', 'companies', 'media.media']),
+                'candidate' => [
+                    'public_id' => $candidate->public_id
+                ],
             ], 201);
 
         } catch (\Throwable $e) {
@@ -362,9 +422,9 @@ class CandidateController extends Controller
     // =========================================================================
     // UPDATE
     // =========================================================================
-    public function update(Request $request, int $id)
+    public function update(Request $request, string $id)
     {
-        $candidate = Candidate::find($id);
+        $candidate = Candidate::where('public_id', $id)->first();;
 
         if (!$candidate) {
             return response()->json([
@@ -463,9 +523,9 @@ class CandidateController extends Controller
     // =========================================================================
     // DELETE (soft: active = false)
     // =========================================================================
-    public function delete(int $id)
+    public function delete(string $id)
     {
-        $candidate = Candidate::find($id);
+        $candidate = Candidate::where('public_id', $id)->first();;
         if (!$candidate) {
             return response()->json(['success' => false, 'message' => 'Candidato non trovato.'], 404);
         }
