@@ -29,12 +29,12 @@ class PlannedExamInscriptionController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'planned_exam_public_id' => 'required|exists:planned_exams,public_id',
-            'candidate_public_id'    => 'required|exists:candidates,public_id',
+            'id_planned_exam' => 'required|exists:planned_exams,public_id',
+            'id_candidate'    => 'required|exists:candidates,public_id',
         ]);
 
-        $plannedExam = PlannedExam::where('public_id', $request->planned_exam_public_id)->firstOrFail();
-        $candidate   = \App\Models\Candidate::where('public_id', $request->candidate_public_id)->firstOrFail();
+        $plannedExam = PlannedExam::where('public_id', $request->id_planned_exam)->firstOrFail();
+        $candidate   = \App\Models\Candidate::where('public_id', $request->id_candidate)->firstOrFail();
 
         // 1️⃣ Controllo data (non oggi o passato)
         if (Carbon::parse($plannedExam->date)->startOfDay() <= Carbon::today()) {
