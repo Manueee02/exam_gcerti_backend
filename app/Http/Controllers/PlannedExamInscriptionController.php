@@ -87,7 +87,56 @@ class PlannedExamInscriptionController extends Controller
      */
     public function index()
     {
-        return PlannedExamInscription::with(['plannedExam', 'candidate'])->get();
+        $inscriptions = PlannedExamInscription::with([
+            'plannedExam.exam',
+            'plannedExam.testCenter',
+            'candidate'
+        ])->get()
+            ->map(fn($i) => [
+                'public_id'        => $i->public_id,
+                'status'           => $i->status,
+                'created_at'       => $i->created_at,
+                'note'             => $i->note,
+                'document'         => $i->document,
+                'invoice'          => $i->invoice,
+                'unsigned_document' => $i->unsigned_document,
+                'unsigned_invoice'  => $i->unsigned_invoice,
+                'planned_exam'     => [
+                    'public_id'   => $i->plannedExam->public_id,
+                    'date'        => $i->plannedExam->date,
+                    'time'        => $i->plannedExam->time,
+                    'end_time'    => $i->plannedExam->end_time,
+                    'location'    => $i->plannedExam->location,
+                    'status'      => $i->plannedExam->status,
+                    'exam'        => [
+                        'public_id'   => $i->plannedExam->exam->public_id,
+                        'name'        => $i->plannedExam->exam->name,
+                        'type'        => $i->plannedExam->exam->type,
+                        'description' => $i->plannedExam->exam->description,
+                        'cost'        => $i->plannedExam->exam->cost,
+                        'color'       => $i->plannedExam->exam->color,
+                        'active'      => $i->plannedExam->exam->active,
+                        'created_at'  => $i->plannedExam->exam->created_at,
+                        'updated_at'  => $i->plannedExam->exam->updated_at,
+                    ],
+                    'test_center' => [
+                        'public_id'   => $i->plannedExam->testCenter->public_id,
+                        'name'        => $i->plannedExam->testCenter->name,
+                        'description' => $i->plannedExam->testCenter->description,
+                        'address'     => $i->plannedExam->testCenter->address,
+                        'city'        => $i->plannedExam->testCenter->city,
+                        'province'    => $i->plannedExam->testCenter->province,
+                    ],
+                ],
+                'candidate' => [
+                    'public_id' => $i->candidate->public_id,
+                    'name'      => $i->candidate->name,
+                    'surname'   => $i->candidate->surname,
+                    'email'     => $i->candidate->email,
+                ],
+            ]);
+
+        return response()->json($inscriptions);
     }
 
     /**
@@ -97,14 +146,58 @@ class PlannedExamInscriptionController extends Controller
     {
         $candidate = \App\Models\Candidate::where('public_id', $publicId)->firstOrFail();
 
-        return PlannedExamInscription::with([
-            'plannedExam',
+        $inscriptions = PlannedExamInscription::with([
             'plannedExam.exam',
             'plannedExam.testCenter',
         ])
             ->where('id_candidate', $candidate->id)
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->map(fn($i) => [
+                'public_id'        => $i->public_id,
+                'status'           => $i->status,
+                'created_at'       => $i->created_at,
+                'note'             => $i->note,
+                'document'         => $i->document,
+                'invoice'          => $i->invoice,
+                'unsigned_document'=> $i->unsigned_document,
+                'unsigned_invoice' => $i->unsigned_invoice,
+                'planned_exam'     => [
+                    'public_id'   => $i->plannedExam->public_id,
+                    'date'        => $i->plannedExam->date,
+                    'time'        => $i->plannedExam->time,
+                    'end_time'    => $i->plannedExam->end_time,
+                    'location'    => $i->plannedExam->location,
+                    'status'      => $i->plannedExam->status,
+                    'exam'        => [
+                        'public_id'   => $i->plannedExam->exam->public_id,
+                        'name'        => $i->plannedExam->exam->name,
+                        'type'        => $i->plannedExam->exam->type,
+                        'description' => $i->plannedExam->exam->description,
+                        'cost'        => $i->plannedExam->exam->cost,
+                        'color'       => $i->plannedExam->exam->color,
+                        'active'      => $i->plannedExam->exam->active,
+                        'created_at'  => $i->plannedExam->exam->created_at,
+                        'updated_at'  => $i->plannedExam->exam->updated_at,
+                    ],
+                    'test_center' => [
+                        'public_id'   => $i->plannedExam->testCenter->public_id,
+                        'name'        => $i->plannedExam->testCenter->name,
+                        'description' => $i->plannedExam->testCenter->description,
+                        'address'     => $i->plannedExam->testCenter->address,
+                        'city'        => $i->plannedExam->testCenter->city,
+                        'province'    => $i->plannedExam->testCenter->province,
+                    ],
+                ],
+                'candidate' => [
+                    'public_id' => $candidate->public_id,
+                    'name'      => $candidate->name,
+                    'surname'   => $candidate->surname,
+                    'email'     => $candidate->email,
+                ],
+            ]);
+
+        return response()->json($inscriptions);
     }
 
     /**
@@ -123,9 +216,8 @@ class PlannedExamInscriptionController extends Controller
     public function show(string $publicId)
     {
         $inscription = PlannedExamInscription::with([
-            'plannedExam',
             'plannedExam.exam',
-            'candidate',
+            'plannedExam.testCenter',
             'candidate.media',
             'candidate.media.media',
             'documentMedia',
@@ -136,7 +228,72 @@ class PlannedExamInscriptionController extends Controller
 
         $this->authorize('view', $inscription);
 
-        return $inscription;
+        $inscriptionMapped = [
+            'public_id'         => $inscription->public_id,
+            'status'            => $inscription->status,
+            'created_at'        => $inscription->created_at,
+            'note'              => $inscription->note,
+            'document'          => $inscription->document,
+            'invoice'           => $inscription->invoice,
+            'unsigned_document' => $inscription->unsigned_document,
+            'unsigned_invoice'  => $inscription->unsigned_invoice,
+            'planned_exam'      => [
+                'public_id'   => $inscription->plannedExam->public_id,
+                'date'        => $inscription->plannedExam->date,
+                'time'        => $inscription->plannedExam->time,
+                'end_time'    => $inscription->plannedExam->end_time,
+                'location'    => $inscription->plannedExam->location,
+                'status'      => $inscription->plannedExam->status,
+                'exam'        => [
+                    'public_id'   => $inscription->plannedExam->exam->public_id,
+                    'name'        => $inscription->plannedExam->exam->name,
+                    'type'        => $inscription->plannedExam->exam->type,
+                    'description' => $inscription->plannedExam->exam->description,
+                    'cost'        => $inscription->plannedExam->exam->cost,
+                    'color'       => $inscription->plannedExam->exam->color,
+                    'active'      => $inscription->plannedExam->exam->active,
+                    'created_at'  => $inscription->plannedExam->exam->created_at,
+                    'updated_at'  => $inscription->plannedExam->exam->updated_at,
+                ],
+                'test_center' => [
+                    'public_id'   => $inscription->plannedExam->testCenter->public_id,
+                    'name'        => $inscription->plannedExam->testCenter->name,
+                    'description' => $inscription->plannedExam->testCenter->description,
+                    'address'     => $inscription->plannedExam->testCenter->address,
+                    'city'        => $inscription->plannedExam->testCenter->city,
+                    'province'    => $inscription->plannedExam->testCenter->province,
+                ],
+            ],
+            'candidate' => [
+                'public_id'         => $inscription->candidate->public_id,
+                'name'              => $inscription->candidate->name,
+                'surname'           => $inscription->candidate->surname,
+                'fiscal_code'           => $inscription->candidate->fiscal_code,
+                'email'             => $inscription->candidate->email,
+                'active'            => $inscription->candidate->active,
+                'birthcommun'       => $inscription->candidate->birthcommun,
+                'birthcountry'      => $inscription->candidate->birthcountry,
+                'birthdate'         => $inscription->candidate->birthdate,
+                'birthplace'        => $inscription->candidate->birthplace,
+                'birthprovince'     => $inscription->candidate->birthprovince,
+                'phone'             => $inscription->candidate->phone,
+                'residence_address' => $inscription->candidate->residence_address,
+                'residence_city'    => $inscription->candidate->residence_city,
+                'residence_country' => $inscription->candidate->residence_country,
+                'residence_province'=> $inscription->candidate->residence_province,
+                'residence_zip'     => $inscription->candidate->residence_zip,
+                'sex'               => $inscription->candidate->sex,
+                'media'             => $inscription->candidate->media,
+                'is_foreign'             => $inscription->candidate->is_foreign,
+
+            ],
+            'document_media'          => $inscription->documentMedia,
+            'invoice_media'           => $inscription->invoiceMedia,
+            'unsigned_document_media' => $inscription->unsignedDocumentMedia,
+            'unsigned_invoice_media'  => $inscription->unsignedInvoiceMedia,
+        ];
+
+        return response()->json($inscriptionMapped);
     }
 
     /**
@@ -258,15 +415,79 @@ class PlannedExamInscriptionController extends Controller
 
             DB::commit();
 
-            return response()->json($inscription->fresh([
+            $inscription = $inscription->fresh([
                 'plannedExam',
                 'plannedExam.exam',
+                'plannedExam.testCenter',
                 'candidate',
+                'candidate.media',
                 'documentMedia',
                 'invoiceMedia',
                 'unsignedDocumentMedia',
                 'unsignedInvoiceMedia',
-            ]));
+            ]);
+
+            return response()->json([
+                'public_id'         => $inscription->public_id,
+                'status'            => $inscription->status,
+                'created_at'        => $inscription->created_at,
+                'note'              => $inscription->note,
+                'document'          => $inscription->document,
+                'invoice'           => $inscription->invoice,
+                'unsigned_document' => $inscription->unsigned_document,
+                'unsigned_invoice'  => $inscription->unsigned_invoice,
+                'planned_exam'      => [
+                    'public_id'   => $inscription->plannedExam->public_id,
+                    'date'        => $inscription->plannedExam->date,
+                    'time'        => $inscription->plannedExam->time,
+                    'end_time'    => $inscription->plannedExam->end_time,
+                    'location'    => $inscription->plannedExam->location,
+                    'status'      => $inscription->plannedExam->status,
+                    'exam'        => [
+                        'public_id'   => $inscription->plannedExam->exam->public_id,
+                        'name'        => $inscription->plannedExam->exam->name,
+                        'type'        => $inscription->plannedExam->exam->type,
+                        'description' => $inscription->plannedExam->exam->description,
+                        'cost'        => $inscription->plannedExam->exam->cost,
+                        'color'       => $inscription->plannedExam->exam->color,
+                        'active'      => $inscription->plannedExam->exam->active,
+                        'created_at'  => $inscription->plannedExam->exam->created_at,
+                        'updated_at'  => $inscription->plannedExam->exam->updated_at,
+                    ],
+                    'test_center' => [
+                        'public_id'   => $inscription->plannedExam->testCenter->public_id,
+                        'name'        => $inscription->plannedExam->testCenter->name,
+                        'description' => $inscription->plannedExam->testCenter->description,
+                        'address'     => $inscription->plannedExam->testCenter->address,
+                        'city'        => $inscription->plannedExam->testCenter->city,
+                        'province'    => $inscription->plannedExam->testCenter->province,
+                    ],
+                ],
+                'candidate' => [
+                    'public_id'  => $inscription->candidate->public_id,
+                    'name'       => $inscription->candidate->name,
+                    'surname'    => $inscription->candidate->surname,
+                    'email'      => $inscription->candidate->email,
+                    'active'     => $inscription->candidate->active,
+                    'birthcommun'=> $inscription->candidate->birthcommun,
+                    'birthcountry'=> $inscription->candidate->birthcountry,
+                    'birthdate'  => $inscription->candidate->birthdate,
+                    'birthplace' => $inscription->candidate->birthplace,
+                    'birthprovince'=> $inscription->candidate->birthprovince,
+                    'phone'      => $inscription->candidate->phone,
+                    'residence_address'=> $inscription->candidate->residence_address,
+                    'residence_city'=> $inscription->candidate->residence_city,
+                    'residence_country'=> $inscription->candidate->residence_country,
+                    'residence_province'=> $inscription->candidate->residence_province,
+                    'residence_zip'=> $inscription->candidate->residence_zip,
+                    'sex'        => $inscription->candidate->sex,
+                    'media'      => $inscription->candidate->media, // torna esattamente come dalla relazione
+                ],
+                'document_media'          => $inscription->documentMedia,
+                'invoice_media'           => $inscription->invoiceMedia,
+                'unsigned_document_media' => $inscription->unsignedDocumentMedia,
+                'unsigned_invoice_media'  => $inscription->unsignedInvoiceMedia,
+            ]);
 
         } catch (\Exception $e) {
             DB::rollBack();
