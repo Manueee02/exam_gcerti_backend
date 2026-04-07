@@ -12,7 +12,7 @@ class UserCreatedExaminerDecisionmaker extends Model
     protected $table = 'user_created_examiner_decisionmaker';
 
     protected $fillable = [
-        'id_auditor',
+        'auditor_public_id',
         'created_at',
         'updated_at',
         'id_user'
