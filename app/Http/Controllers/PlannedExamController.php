@@ -46,12 +46,21 @@ class PlannedExamController extends Controller
             'status' => 'qualificato',
         ]);
 
+        $decisionMakersResponse = $this->examinerService->getExaminers([
+            'type'   => 'decision_maker',
+            'status' => 'qualificato',
+        ]);
+
         $examiners = collect($examinersResponse['data']['data'] ?? [])
             ->keyBy('id');
 
-        $result = $plannedExams->map(function ($plannedExam) use ($examiners) {
+        $decisionMakers = collect($decisionMakersResponse['data']['data'] ?? [])
+            ->keyBy('id');
+
+        $result = $plannedExams->map(function ($plannedExam) use ($examiners, $decisionMakers) {
             $exam     = $plannedExam->exam;
             $examiner = $examiners->get($plannedExam->id_examiner);
+            $decisionMaker = $decisionMakers->get($plannedExam->id_decision_maker);
 
             return [
                 'public_id'   => $plannedExam->public_id,
@@ -73,12 +82,17 @@ class PlannedExamController extends Controller
                 'exam' => [
                     'public_id' => $exam?->public_id ?? null,
                 ],
-                'examiner' => [
-                    'public_id' => $plannedExam->examiner?->public_id ?? null,
-                ],
-                'decision_maker' => [
-                    'public_id' => $plannedExam->decisionMaker?->public_id ?? null,
-                ],
+                'examiner' => $examiner
+                    ? [
+                        'public_id' => $examiner['public_id'] ?? null,
+                    ]
+                    : null,
+
+                'decision_maker' => $decisionMaker
+                    ? [
+                        'public_id' => $decisionMaker['public_id'] ?? null,
+                    ]
+                    : null,
             ];
         });
 
@@ -261,7 +275,19 @@ class PlannedExamController extends Controller
     // GET /api/planned-exams/reference-data
     public function referenceData()
     {
-        $exams = Exam::all();
+        $exams = Exam::all()
+            ->map(fn($e) => [
+                'public_id'  => $e->public_id,
+                'name'       => $e->name,
+                'description'=> $e->description,
+                'type'       => $e->type,
+                'cost'       => $e->cost,
+                'color'      => $e->color,
+                'active'     => $e->active,
+                'created_at' => $e->created_at,
+                'updated_at' => $e->updated_at,
+            ])
+            ->values();
 
         $examinersResponse = $this->examinerService->getExaminers([
             'type'   => 'examiner',
