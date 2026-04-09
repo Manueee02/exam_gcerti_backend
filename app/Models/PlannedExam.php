@@ -90,7 +90,7 @@ class PlannedExam extends Model
         return $this->hasMany(PlannedExamCandidate::class, 'id_planned_exam');
     }
 
-    public function iscritions()
+    public function inscriptions()
     {
         return $this->hasMany(PlannedExamInscription::class, 'id_planned_exam');
     }
