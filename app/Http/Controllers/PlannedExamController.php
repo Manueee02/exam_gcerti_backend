@@ -117,6 +117,7 @@ class PlannedExamController extends Controller
                 'exam',
                 'testCenter',
                 'candidateExams',
+                'candidateExams.candidate',
                 'inscriptions',
                 'inscriptions.candidate',
             ])->where('public_id', $publicId)->first();
