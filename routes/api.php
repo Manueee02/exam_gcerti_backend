@@ -160,7 +160,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->group(function () {
             Route::post('/store', [CandidateController::class, 'store']);
             Route::put('/update/{public_id}', [CandidateController::class, 'update']);
-
+            Route::get('/{id}/events', [CandidateController::class, 'getEvents']);
         }
     );
     Route::middleware('role:admin,superAdmin')

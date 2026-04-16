@@ -23,7 +23,8 @@ class PlannedExam extends Model
         'date',
         'time',
         'end_time',
-        'location'
+        'location',
+        'active_exam_session'
     ];
 
     protected $casts = [
