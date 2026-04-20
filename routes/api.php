@@ -3,8 +3,10 @@
 
 use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\EmailVerificationController;
+use App\Http\Controllers\ExamController;
 use App\Http\Controllers\PlannedExamController;
 use App\Http\Controllers\PlannedExamInscriptionController;
+use App\Http\Controllers\QuestionController;
 use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DecisionMakerController;
@@ -193,6 +195,33 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     Route::put('inscriptions/{public_id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
     Route::get('inscriptions/show/{public_id}', [PlannedExamInscriptionController::class, 'show']);
 
+    //Domande e risposte
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('exams/{public_id}')->group(function () {
+            // lista domande
+            Route::get('/questions', [QuestionController::class, 'index']);
+            // crea domanda
+            Route::post('/questions', [QuestionController::class, 'store']);
+            // import da excel/csv
+            Route::post('/questions/import', [QuestionController::class, 'import']);
+    });
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('questions')->group(function () {
+            // update domanda
+            Route::put('/{public_id}', [QuestionController::class, 'update']);
+            // delete domanda
+            Route::delete('/{public_id}', [QuestionController::class, 'destroy']);
+    });
+
+    //Esami
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('exams')->group(function () {
+            Route::get('/', [ExamController::class, 'index']);
+            Route::post('/', [ExamController::class, 'store']);
+            Route::get('/{public_id}', [ExamController::class, 'show']);
+            Route::put('/{public_id}', [ExamController::class, 'update']);
+            Route::delete('/{public_id}', [ExamController::class, 'destroy']);
+    });
 
 });
 

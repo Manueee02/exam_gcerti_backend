@@ -44,4 +44,9 @@ class Exam extends Model
     {
         return $this->hasMany(CandidatePayment::class, 'id_exam', 'id');
     }
+
+    public function getRouteKeyName()
+    {
+        return 'public_id';
+    }
 }
