@@ -3,25 +3,22 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
 class Answer extends Model
 {
-    use HasUuids;
 
     protected $table = 'answers';
 
     protected $fillable = [
         'public_key',
-        'question_id',
+        'id_question',
         'text',
         'is_correct',
-        'order',
     ];
 
     protected $casts = [
         'public_key' => 'string',
-        'is_correct' => 'boolean',
+        'is_correct' => 'string',
     ];
 
     /**
@@ -29,7 +26,7 @@ class Answer extends Model
      */
     public function getRouteKeyName()
     {
-        return 'public_key';
+        return 'public_id';
     }
 
     /**
@@ -37,6 +34,6 @@ class Answer extends Model
      */
     public function question()
     {
-        return $this->belongsTo(Question::class);
+        return $this->belongsTo(Question::class, 'id_question');
     }
 }

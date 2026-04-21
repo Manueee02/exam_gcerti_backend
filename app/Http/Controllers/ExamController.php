@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Models\Exam;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 
 class ExamController extends Controller
 {
+    use AuthorizesRequests;
+
     /**
      * GET ALL (solo attivi)
      */

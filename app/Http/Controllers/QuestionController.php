@@ -5,12 +5,18 @@ namespace App\Http\Controllers;
 use App\Models\Question;
 use App\Models\Answer;
 use App\Models\Exam;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+
 
 class QuestionController extends Controller
 {
+    use AuthorizesRequests;
+
     /**
      * Lista domande per esame
      */
@@ -18,7 +24,7 @@ class QuestionController extends Controller
     {
         $this->authorize('viewAny', Question::class);
 
-        $exam = Exam::where('public_key', $publicId)->firstOrFail();
+        $exam = Exam::where('public_id', $publicId)->firstOrFail();
 
         $questions = Question::with('answers')
             ->where('exam_id', $exam->id)
@@ -49,7 +55,7 @@ class QuestionController extends Controller
             return response()->json(['error' => 'Almeno una risposta deve essere corretta'], 422);
         }
 
-        $exam = Exam::where('public_key', $publicId)->firstOrFail();
+        $exam = Exam::where('public_id', $publicId)->firstOrFail();
 
         DB::transaction(function () use ($validated, $exam) {
 
@@ -63,10 +69,9 @@ class QuestionController extends Controller
 
             foreach ($validated['answers'] as $index => $answer) {
                 Answer::create([
-                    'question_id' => $question->id,
+                    'id_question' => $question->id,
                     'text' => $answer['text'],
                     'is_correct' => $answer['is_correct'],
-                    'order' => $index + 1,
                 ]);
             }
         });
@@ -110,10 +115,9 @@ class QuestionController extends Controller
             // reinserisci
             foreach ($validated['answers'] as $index => $answer) {
                 Answer::create([
-                    'question_id' => $question->id,
+                    'id_question' => $question->id,
                     'text' => $answer['text'],
                     'is_correct' => $answer['is_correct'],
-                    'order' => $index + 1,
                 ]);
             }
         });
@@ -141,61 +145,120 @@ class QuestionController extends Controller
         $this->authorize('import', Question::class);
 
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,csv'
+            'file' => 'required|file|mimes:xlsx,xls,xlsm'
         ]);
 
-        $exam = Exam::where('public_key', $publicId)->firstOrFail();
+        $exam = Exam::where('public_id', $publicId)->firstOrFail();
 
-        $rows = array_map('str_getcsv', file($request->file('file')));
+        $spreadsheet = IOFactory::load($request->file('file')->getPathname());
+        $rows = $spreadsheet->getActiveSheet()->toArray();
+
+        if (count($rows) < 2) {
+            return response()->json(['error' => 'File vuoto'], 422);
+        }
+
+        $expectedHeaders = [
+            'text', 'type', 'area', 'level',
+            'answer_1', 'answer_2', 'answer_3', 'answer_4', 'is_correct'
+        ];
+
+        $headers = array_map(fn($h) => strtolower(trim($h ?? '')), $rows[0]);
+
+        if ($headers !== $expectedHeaders) {
+            return response()->json([
+                'error' => 'Formato file non valido',
+                'expected' => $expectedHeaders,
+                'received' => $headers
+            ], 422);
+        }
 
         $inserted = 0;
+        $updated = 0;
         $skipped = 0;
 
-        DB::transaction(function () use ($rows, $exam, &$inserted, &$skipped) {
+        DB::transaction(function () use ($rows, $exam, &$inserted, &$updated, &$skipped) {
+
+            $existingQuestions = Question::with('answers')
+                ->where('exam_id', $exam->id)
+                ->get();
 
             foreach ($rows as $index => $row) {
 
-                // skip header
                 if ($index === 0) continue;
 
-                [$questionText, $a1, $a2, $a3, $a4, $correctIndex] = $row;
+                [
+                    $text, $type, $area, $level,
+                    $a1, $a2, $a3, $a4, $correctKey
+                ] = array_map(fn($v) => is_string($v) ? trim(strtolower($v)) : $v, $row);
 
-                // normalizzazione testo (anti duplicati)
-                $normalized = strtolower(trim($questionText));
+                if (!$text || !$a1 || !$a2) continue;
 
-                $exists = Question::where('exam_id', $exam->id)
-                    ->whereRaw('LOWER(TRIM(text)) = ?', [$normalized])
-                    ->exists();
+                $answersMap = [
+                    'answer_1' => $a1,
+                    'answer_2' => $a2,
+                    'answer_3' => $a3,
+                    'answer_4' => $a4,
+                ];
 
-                if ($exists) {
-                    $skipped++;
+                if (!isset($answersMap[$correctKey])) continue;
+
+                $normalizedText = strtolower($text);
+                $normalizedA1   = strtolower($a1);
+                $normalizedA2   = strtolower($a2);
+
+                $foundExact   = null;
+                $foundPartial = null;
+
+                foreach ($existingQuestions as $q) {
+                    $answers = $q->answers->values();
+                    $qa1 = strtolower(trim($answers[0]->text ?? ''));
+                    $qa2 = strtolower(trim($answers[1]->text ?? ''));
+
+                    $matchCount = 0;
+                    if (strtolower(trim($q->text)) === $normalizedText) $matchCount++;
+                    if ($qa1 === $normalizedA1) $matchCount++;
+                    if ($qa2 === $normalizedA2) $matchCount++;
+
+                    if ($matchCount === 3) { $foundExact = $q; break; }
+                    if ($matchCount >= 2)    $foundPartial = $q;
+                }
+
+                if ($foundExact) { $skipped++; continue; }
+
+                if ($foundPartial) {
+                    $foundPartial->update(['text' => $text, 'type' => $type, 'area' => $area, 'level' => $level]);
+                    $foundPartial->answers()->delete();
+                    foreach ($answersMap as $key => $value) {
+                        Answer::create([
+                            'id_question' => $foundPartial->id, // ← era $question->id
+                            'text' => $value,
+                            'is_correct' => strtolower(trim($key)) === strtolower(trim($correctKey)),
+                        ]);
+                    }
+                    $updated++;
                     continue;
                 }
 
-                $question = Question::create([
-                    'exam_id' => $exam->id,
-                    'text' => $questionText,
-                    'type' => 'multiple_choice'
-                ]);
-
-                $answers = [$a1, $a2, $a3, $a4];
-
-                foreach ($answers as $i => $text) {
-                    Answer::create([
-                        'question_id' => $question->id,
-                        'text' => $text,
-                        'is_correct' => ($i + 1) == $correctIndex,
-                        'order' => $i + 1
-                    ]);
+                $question = Question::create(['exam_id' => $exam->id, 'text' => $text, 'type' => $type, 'area' => $area, 'level' => $level]);
+                foreach ($answersMap as $key => $value) {
+                    Answer::create(['id_question' => $question->id, 'text' => $value, 'is_correct' => $key === $correctKey]);
                 }
-
                 $inserted++;
             }
         });
 
-        return response()->json([
-            'inserted' => $inserted,
-            'skipped' => $skipped
-        ]);
+        return response()->json(['inserted' => $inserted, 'updated' => $updated, 'skipped' => $skipped]);
+    }
+
+    public function downloadTemplate()
+    {
+
+        $path = 'templates/quiz_template.xlsx';//C:\xampp\htdocs\Progetti\gcerti\exam\gcerti_exam_backend\storage\app\templates\quiz_template.xlsx
+
+        if (!Storage::disk('local')->exists($path)) {
+            return response()->json(['error' => 'Template non trovato'], 404);
+        }
+
+        return Storage::disk('local')->download($path, 'quiz_template.xlsx');
     }
 }

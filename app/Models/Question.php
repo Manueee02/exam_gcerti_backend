@@ -3,16 +3,16 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Support\Str;
 
 class Question extends Model
 {
-    use HasUuids;
+    // Rimuovi HasUuids — l'id rimane intero auto-increment
 
     protected $table = 'questions';
 
     protected $fillable = [
-        'public_key',
+        'public_id',   // <-- rinomina da public_key a public_id (coerente col resto)
         'exam_id',
         'text',
         'type',
@@ -21,29 +21,25 @@ class Question extends Model
         'points',
     ];
 
-    protected $casts = [
-        'public_key' => 'string',
-    ];
-
-    /**
-     * Route model binding su public_key invece che id
-     */
-    public function getRouteKeyName()
+    protected static function booted(): void
     {
-        return 'public_key';
+        static::creating(function (Question $question) {
+            if (empty($question->public_id)) {
+                $question->public_id = (string) Str::uuid();
+            }
+        });
     }
 
-    /**
-     * Relazione: una domanda ha molte risposte
-     */
+    public function getRouteKeyName(): string
+    {
+        return 'public_id';
+    }
+
     public function answers()
     {
-        return $this->hasMany(Answer::class);
+        return $this->hasMany(Answer::class, 'id_question');
     }
 
-    /**
-     * Relazione: appartiene a un esame
-     */
     public function exam()
     {
         return $this->belongsTo(Exam::class);

@@ -196,21 +196,24 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     Route::get('inscriptions/show/{public_id}', [PlannedExamInscriptionController::class, 'show']);
 
     //Domande e risposte
-    Route::middleware('role:admin,superAdmin')
-        ->prefix('exams/{public_id}')->group(function () {
-            // lista domande
-            Route::get('/questions', [QuestionController::class, 'index']);
-            // crea domanda
-            Route::post('/questions', [QuestionController::class, 'store']);
-            // import da excel/csv
-            Route::post('/questions/import', [QuestionController::class, 'import']);
-    });
-    Route::middleware('role:admin,superAdmin')
-        ->prefix('questions')->group(function () {
-            // update domanda
-            Route::put('/{public_id}', [QuestionController::class, 'update']);
-            // delete domanda
-            Route::delete('/{public_id}', [QuestionController::class, 'destroy']);
+    Route::middleware('role:admin,superAdmin')->group(function () {
+
+        Route::prefix('exams/{publicId}/questions')->group(function () {
+            // Lista domande di un esame
+            Route::get('/', [QuestionController::class, 'index']);
+            // Creazione domanda in un esame
+            Route::post('/', [QuestionController::class, 'store']);
+            // Import domande da file Excel/CSV
+            Route::post('/import', [QuestionController::class, 'import']);
+            Route::get('/download-template', [QuestionController::class, 'downloadTemplate']);
+        });
+        Route::prefix('exam-questions')->group(function () {
+            // Aggiorna domanda
+            Route::put('/{question}', [QuestionController::class, 'update']);
+            // Elimina domanda
+            Route::delete('/{question}', [QuestionController::class, 'destroy']);
+        });
+
     });
 
     //Esami
