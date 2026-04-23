@@ -221,9 +221,9 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->prefix('exams')->group(function () {
             Route::get('/', [ExamController::class, 'index']);
             Route::post('/', [ExamController::class, 'store']);
-            Route::get('/{public_id}', [ExamController::class, 'show']);
-            Route::put('/{public_id}', [ExamController::class, 'update']);
-            Route::delete('/{public_id}', [ExamController::class, 'destroy']);
+            Route::get('/{exam}', [ExamController::class, 'show']);
+            Route::put('/{exam}', [ExamController::class, 'update']);
+            Route::delete('/{exam}', [ExamController::class, 'destroy']);
     });
 
 });

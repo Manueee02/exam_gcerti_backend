@@ -47,7 +47,7 @@ class QuestionController extends Controller
             'level' => 'nullable|string',
             'answers' => 'required|array|min:2',
             'answers.*.text' => 'required|string',
-            'answers.*.is_correct' => 'required|boolean',
+            'answers.*.is_correct' => 'required|string',
         ]);
 
         // almeno una risposta corretta
@@ -93,7 +93,7 @@ class QuestionController extends Controller
             'level' => 'nullable|string',
             'answers' => 'required|array|min:2',
             'answers.*.text' => 'required|string',
-            'answers.*.is_correct' => 'required|boolean',
+            'answers.*.is_correct' => 'required|string',
         ]);
 
         if (!collect($validated['answers'])->contains('is_correct', true)) {
@@ -232,8 +232,7 @@ class QuestionController extends Controller
                         Answer::create([
                             'id_question' => $foundPartial->id, // ← era $question->id
                             'text' => $value,
-                            'is_correct' => strtolower(trim($key)) === strtolower(trim($correctKey)),
-                        ]);
+                            'is_correct' => ($key === $correctKey) ? 'true' : 'false'                        ]);
                     }
                     $updated++;
                     continue;
@@ -241,7 +240,7 @@ class QuestionController extends Controller
 
                 $question = Question::create(['exam_id' => $exam->id, 'text' => $text, 'type' => $type, 'area' => $area, 'level' => $level]);
                 foreach ($answersMap as $key => $value) {
-                    Answer::create(['id_question' => $question->id, 'text' => $value, 'is_correct' => $key === $correctKey]);
+                    Answer::create(['id_question' => $question->id, 'text' => $value, 'is_correct' => ($key === $correctKey) ? 'true' : 'false'   ]);
                 }
                 $inserted++;
             }
