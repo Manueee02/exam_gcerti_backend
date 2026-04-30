@@ -3,45 +3,42 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Question extends Model
 {
-    // Rimuovi HasUuids — l'id rimane intero auto-increment
-
     protected $table = 'questions';
 
     protected $fillable = [
-        'public_id',   // <-- rinomina da public_key a public_id (coerente col resto)
+        'public_id',
         'exam_id',
+        'exam_area_id',
+        'exam_level_id',
         'text',
         'type',
-        'area',
-        'level',
         'points',
     ];
 
-    protected static function booted(): void
+    // ── Relazioni ──────────────────────────────────────────────────────────────
+
+    public function exam(): BelongsTo
     {
-        static::creating(function (Question $question) {
-            if (empty($question->public_id)) {
-                $question->public_id = (string) Str::uuid();
-            }
-        });
+        return $this->belongsTo(Exam::class, 'exam_id');
     }
 
-    public function getRouteKeyName(): string
+    public function area(): BelongsTo
     {
-        return 'public_id';
+        return $this->belongsTo(ExamArea::class, 'exam_area_id');
     }
 
-    public function answers()
+    public function level(): BelongsTo
+    {
+        return $this->belongsTo(ExamLevel::class, 'exam_level_id');
+    }
+
+    public function answers(): HasMany
     {
         return $this->hasMany(Answer::class, 'id_question');
-    }
-
-    public function exam()
-    {
-        return $this->belongsTo(Exam::class);
     }
 }

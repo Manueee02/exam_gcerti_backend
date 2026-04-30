@@ -48,4 +48,14 @@ class Exam extends Model
     {
         return 'public_id';
     }
+
+    public function areas()
+    {
+        return $this->hasMany(ExamArea::class, 'exam_id');
+    }
+
+    public function questions()
+    {
+        return $this->hasMany(Question::class, 'exam_id');
+    }
 }
