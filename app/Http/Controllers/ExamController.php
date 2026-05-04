@@ -22,7 +22,9 @@ class ExamController extends Controller
         try {
             $this->authorize('viewAny', Exam::class);
 
-            $exams = Exam::where('active', 'true')->get();
+            $exams = Exam::with('areas.levels')
+                ->where('active', "true")
+                ->get();
 
             return response()->json($exams);
         } catch (AuthorizationException $e) {

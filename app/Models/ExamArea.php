@@ -14,6 +14,7 @@ class ExamArea extends Model
         'exam_id',
         'name',
         'label',
+        'order'
     ];
 
     public function exam(): BelongsTo

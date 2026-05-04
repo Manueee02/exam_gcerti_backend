@@ -41,4 +41,9 @@ class Question extends Model
     {
         return $this->hasMany(Answer::class, 'id_question');
     }
+
+    public function getRouteKeyName(): string
+    {
+        return 'public_id';
+    }
 }
