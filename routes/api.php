@@ -1,6 +1,7 @@
 <?php
 
 
+use App\Http\Controllers\Api\ExamSessionController;
 use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\EmailVerificationController;
 use App\Http\Controllers\ExamController;
@@ -226,6 +227,21 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::delete('/{exam}', [ExamController::class, 'destroy']);
     });
 
+    //Exam Engine
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('exam-sessions')->group(function () {
+            Route::post('/start/{plannedExamPublicId}', [ExamSessionController::class, 'start']);
+            Route::post('/end/{sessionPublicId}', [ExamSessionController::class, 'end']);
+            Route::post('/{sessionPublicId}/enable-candidate', [ExamSessionController::class, 'enableCandidate']);
+        });
+    Route::middleware('role:user')
+        ->prefix('exam-sessions')
+        ->group(function () {
+            Route::get('/{sessionPublicId}/candidate', [ExamSessionController::class, 'getCandidateExam']);
+            Route::post('/{sessionPublicId}/answer', [ExamSessionController::class, 'submitAnswer']);
+            Route::get('/{sessionPublicId}/score', [ExamSessionController::class, 'score']);
+        }
+        );
 });
 
 

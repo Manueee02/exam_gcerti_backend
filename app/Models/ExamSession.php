@@ -43,4 +43,11 @@ class ExamSession extends Model
     {
         return $this->hasMany(ExamSessionLog::class, 'id_exam_session');
     }
+    public function candidateRuns()
+    {
+        return $this->hasMany(
+            ExamSessionCandidateRun::class,
+            'id_exam_session'
+        );
+    }
 }
