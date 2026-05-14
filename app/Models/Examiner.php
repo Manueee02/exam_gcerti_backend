@@ -16,6 +16,7 @@ class Examiner extends Model
     public $timestamps = true;
 
     protected $fillable = [
+        'public_id',
         'name',
         'surname',
         'email',
@@ -62,5 +63,4 @@ class Examiner extends Model
             'id_canidates_exam' // FK in Chat
         );
     }
-
 }

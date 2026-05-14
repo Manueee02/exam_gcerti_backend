@@ -80,20 +80,22 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
 
     //users
     Route::middleware('role:superAdmin')
-        ->group(function () {
-            Route::get('/users', [UserController::class, 'index']);
-            Route::get('/users-roles', [UserController::class, 'indexRoles']);
-            Route::put('/change-role-users/{public_id}', [UserController::class, 'updateRole']);
-            Route::delete('/users/{public_id}', [UserController::class, 'destroy']);
-            Route::post('/create-user', [UserController::class, 'store']);
-        }
-    );
+        ->group(
+            function () {
+                Route::get('/users', [UserController::class, 'index']);
+                Route::get('/users-roles', [UserController::class, 'indexRoles']);
+                Route::put('/change-role-users/{public_id}', [UserController::class, 'updateRole']);
+                Route::delete('/users/{public_id}', [UserController::class, 'destroy']);
+                Route::post('/create-user', [UserController::class, 'store']);
+            }
+        );
     Route::middleware('role:admin,superAdmin')
-        ->group(function () {
-            Route::post('/create-user-server', [UserController::class, 'storeServerApp1User']);
-            Route::get('/has-server-user/{id_auditor}', [UserController::class, 'auditorHasUser']);
-        }
-    );
+        ->group(
+            function () {
+                Route::post('/create-user-server', [UserController::class, 'storeServerApp1User']);
+                Route::get('/has-server-user/{id_auditor}', [UserController::class, 'auditorHasUser']);
+            }
+        );
 
 
     //media
@@ -114,45 +116,49 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     //Esaminatori
     Route::middleware('role:admin,superAdmin')
         ->prefix('examiners')
-        ->group(function () {
+        ->group(
+            function () {
 
-            Route::get('/', [ExaminerController::class, 'index']);
-            Route::get('/{id}', [ExaminerController::class, 'show']);
-            Route::post('/', [ExaminerController::class, 'store']);
-            Route::put('/{id}', [ExaminerController::class, 'update']);
-            Route::delete('/{id}', [ExaminerController::class, 'destroy']);
-            Route::get('/serverApp/examiner-decisionmaker', [Server1Controller::class, 'index']);
-            Route::get('/serverApp/show/{id}', [Server1Controller::class, 'show']);
-            Route::put('/serverApp/update/{id}', [Server1Controller::class, 'updateExaminer']);
-            Route::post('/serverApp/qualifications/update-status', [Server1Controller::class, 'updateQualificationStatus']);
-            Route::post('/serverApp/qualifications/update-status/noIaf', [Server1Controller::class, 'updateQualificationStatusNoIaf']);
-        }
-    );
+                Route::get('/', [ExaminerController::class, 'index']);
+                Route::get('/{id}', [ExaminerController::class, 'show']);
+                Route::post('/', [ExaminerController::class, 'store']);
+                Route::put('/{id}', [ExaminerController::class, 'update']);
+                Route::delete('/{id}', [ExaminerController::class, 'destroy']);
+                Route::post('/{id}/create-user', [ExaminerController::class, 'createUser']);
+                Route::get('/serverApp/examiner-decisionmaker', [Server1Controller::class, 'index']);
+                Route::get('/serverApp/show/{id}', [Server1Controller::class, 'show']);
+                Route::put('/serverApp/update/{id}', [Server1Controller::class, 'updateExaminer']);
+                Route::post('/serverApp/qualifications/update-status', [Server1Controller::class, 'updateQualificationStatus']);
+                Route::post('/serverApp/qualifications/update-status/noIaf', [Server1Controller::class, 'updateQualificationStatusNoIaf']);
+            }
+        );
 
     //Deliberanti
     Route::middleware('role:admin,superAdmin')
         ->prefix('decision-makers')
-        ->group(function () {
+        ->group(
+            function () {
 
-            Route::get('/', [DecisionMakerController::class, 'index']);
-            Route::get('/{id}', [DecisionMakerController::class, 'show']);
-            Route::post('/', [DecisionMakerController::class, 'store']);
-            Route::put('/{id}', [DecisionMakerController::class, 'update']);
-            Route::delete('/{id}', [DecisionMakerController::class, 'destroy']);
-
-        }
-    );
+                Route::get('/', [DecisionMakerController::class, 'index']);
+                Route::get('/{id}', [DecisionMakerController::class, 'show']);
+                Route::post('/', [DecisionMakerController::class, 'store']);
+                Route::put('/{id}', [DecisionMakerController::class, 'update']);
+                Route::delete('/{id}', [DecisionMakerController::class, 'destroy']);
+                Route::post('/{id}/create-user', [DecisionMakerController::class, 'createUser']);
+            }
+        );
 
     //Esami pianificati
     Route::middleware('role:admin,superAdmin')
         ->prefix('planned-exams')
-        ->group(function () {
-            Route::get('/reference-data', [PlannedExamController::class, 'referenceData']);
-            Route::post('/store', [PlannedExamController::class, 'store']);
-            Route::put('/update/{public_id}', [PlannedExamController::class, 'update']);
-            Route::delete('/destroy/{public_id}', [PlannedExamController::class, 'destroy']);
-        }
-    );
+        ->group(
+            function () {
+                Route::get('/reference-data', [PlannedExamController::class, 'referenceData']);
+                Route::post('/store', [PlannedExamController::class, 'store']);
+                Route::put('/update/{public_id}', [PlannedExamController::class, 'update']);
+                Route::delete('/destroy/{public_id}', [PlannedExamController::class, 'destroy']);
+            }
+        );
     Route::get('planned-exams/', [PlannedExamController::class, 'index']);
     Route::get('/planned-exams/show/{public_id}', [PlannedExamController::class, 'show']);
 
@@ -160,19 +166,21 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     //Candidati
     Route::middleware('role:user')
         ->prefix('candidates')
-        ->group(function () {
-            Route::post('/store', [CandidateController::class, 'store']);
-            Route::put('/update/{public_id}', [CandidateController::class, 'update']);
-            Route::get('/{id}/events', [CandidateController::class, 'getEvents']);
-        }
-    );
+        ->group(
+            function () {
+                Route::post('/store', [CandidateController::class, 'store']);
+                Route::put('/update/{public_id}', [CandidateController::class, 'update']);
+                Route::get('/{id}/events', [CandidateController::class, 'getEvents']);
+            }
+        );
     Route::middleware('role:admin,superAdmin')
         ->prefix('candidates')
-        ->group(function () {
-            Route::get('/all', [CandidateController::class, 'index']);
-            Route::put('/delete/{public_id}', [CandidateController::class, 'delete']);
-        }
-    );
+        ->group(
+            function () {
+                Route::get('/all', [CandidateController::class, 'index']);
+                Route::put('/delete/{public_id}', [CandidateController::class, 'delete']);
+            }
+        );
     Route::get('candidates/{public_id}', [CandidateController::class, 'show']);
 
     //Utils
@@ -181,18 +189,20 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     //Iscrizioni
     Route::middleware('role:admin,superAdmin')
         ->prefix('inscriptions')
-        ->group(function () {
-            Route::get('/', [PlannedExamInscriptionController::class, 'index']);
-            Route::get('/status/{status}', [PlannedExamInscriptionController::class, 'byStatus']);
-        }
-    );
+        ->group(
+            function () {
+                Route::get('/', [PlannedExamInscriptionController::class, 'index']);
+                Route::get('/status/{status}', [PlannedExamInscriptionController::class, 'byStatus']);
+            }
+        );
     Route::middleware('role:user')
         ->prefix('inscriptions')
-        ->group(function () {
-            Route::post('/submit', [PlannedExamInscriptionController::class, 'store']);
-            Route::get('/candidate/{public_id}', [PlannedExamInscriptionController::class, 'byCandidate']);
-        }
-    );
+        ->group(
+            function () {
+                Route::post('/submit', [PlannedExamInscriptionController::class, 'store']);
+                Route::get('/candidate/{public_id}', [PlannedExamInscriptionController::class, 'byCandidate']);
+            }
+        );
     Route::put('inscriptions/{public_id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
     Route::get('inscriptions/show/{public_id}', [PlannedExamInscriptionController::class, 'show']);
 
@@ -214,7 +224,6 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             // Elimina domanda
             Route::delete('/{question}', [QuestionController::class, 'destroy']);
         });
-
     });
 
     //Esami
@@ -225,7 +234,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::get('/{exam}', [ExamController::class, 'show']);
             Route::put('/{exam}', [ExamController::class, 'update']);
             Route::delete('/{exam}', [ExamController::class, 'destroy']);
-    });
+        });
 
     //Exam Engine
     Route::middleware('role:admin,superAdmin')
@@ -236,11 +245,12 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         });
     Route::middleware('role:user')
         ->prefix('exam-sessions')
-        ->group(function () {
-            Route::get('/{sessionPublicId}/candidate', [ExamSessionController::class, 'getCandidateExam']);
-            Route::post('/{sessionPublicId}/answer', [ExamSessionController::class, 'submitAnswer']);
-            Route::get('/{sessionPublicId}/score', [ExamSessionController::class, 'score']);
-        }
+        ->group(
+            function () {
+                Route::get('/{sessionPublicId}/candidate', [ExamSessionController::class, 'getCandidateExam']);
+                Route::post('/{sessionPublicId}/answer', [ExamSessionController::class, 'submitAnswer']);
+                Route::get('/{sessionPublicId}/score', [ExamSessionController::class, 'score']);
+            }
         );
 });
 
@@ -255,5 +265,3 @@ Route::fallback(function () {
         'message' => 'La risorsa richiesta non esiste'
     ], 404);
 });
-
-

@@ -21,7 +21,9 @@ class User extends Authenticatable implements JWTSubject
         'name',
         'email',
         'password',
-        'role',
+        'id_role',
+        'email_verified_at',
+        'active_token',
         'refresh_token',
         'first_access',
         'candidate_registration_completed'
@@ -86,5 +88,4 @@ class User extends Authenticatable implements JWTSubject
     {
         return $this->hasOne(Candidate::class, 'id_user');
     }
-
 }

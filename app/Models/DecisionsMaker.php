@@ -16,6 +16,7 @@ class DecisionsMaker extends Model
     public $timestamps = true;
 
     protected $fillable = [
+        'public_id',
         'id_user',
         'name',
         'surname',
@@ -57,5 +58,4 @@ class DecisionsMaker extends Model
             'id'                 // PK PlannedExam
         );
     }
-
 }
