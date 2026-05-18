@@ -198,16 +198,14 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             function () {
                 Route::get('/', [PlannedExamInscriptionController::class, 'index']);
                 Route::get('/status/{status}', [PlannedExamInscriptionController::class, 'byStatus']);
+                Route::get('/candidate/{public_id}', [PlannedExamInscriptionController::class, 'byCandidate']);
             }
         );
     Route::middleware('role:user')
         ->prefix('inscriptions')
-        ->group(
-            function () {
-                Route::post('/submit', [PlannedExamInscriptionController::class, 'store']);
-                Route::get('/candidate/{public_id}', [PlannedExamInscriptionController::class, 'byCandidate']);
-            }
-        );
+        ->group(function () {
+            Route::post('/submit', [PlannedExamInscriptionController::class, 'store']);
+        });
     Route::put('inscriptions/{public_id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
     Route::get('inscriptions/show/{public_id}', [PlannedExamInscriptionController::class, 'show']);
 
