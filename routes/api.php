@@ -160,8 +160,13 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             }
         );
     Route::get('planned-exams/', [PlannedExamController::class, 'index']);
-    Route::get('/planned-exams/show/{public_id}', [PlannedExamController::class, 'show']);
 
+    // Esami assegnati all'utente loggato (examiner o decision maker)
+    Route::middleware('role:examiner,decisionMaker')
+        ->get('/my-exams', [PlannedExamController::class, 'myExams']);
+
+    // Dettaglio esame (accessibile a tutti gli utenti autenticati)
+    Route::get('/planned-exams/show/{public_id}', [PlannedExamController::class, 'show']);
 
     //Candidati
     Route::middleware('role:user')
