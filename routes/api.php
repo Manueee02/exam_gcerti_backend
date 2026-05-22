@@ -17,6 +17,7 @@ use App\Http\Controllers\ResendVerificationController;
 use App\Http\Controllers\Server1Controller;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UtilsController;
+use App\Http\Controllers\GDPRController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 /*
@@ -198,7 +199,6 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             function () {
                 Route::get('/', [PlannedExamInscriptionController::class, 'index']);
                 Route::get('/status/{status}', [PlannedExamInscriptionController::class, 'byStatus']);
-                Route::get('/candidate/{public_id}', [PlannedExamInscriptionController::class, 'byCandidate']);
             }
         );
     Route::middleware('role:user')
@@ -206,8 +206,19 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->group(function () {
             Route::post('/submit', [PlannedExamInscriptionController::class, 'store']);
         });
+    Route::get('inscriptions/candidate/{public_id}', [PlannedExamInscriptionController::class, 'byCandidate'])
+        ->middleware('role:user,admin,superAdmin');
+
     Route::put('inscriptions/{public_id}/status', [PlannedExamInscriptionController::class, 'updateStatus']);
     Route::get('inscriptions/show/{public_id}', [PlannedExamInscriptionController::class, 'show']);
+
+    //GDPR
+    Route::get('/gdpr/active', [GDPRController::class, 'active']);
+    Route::middleware('role:admin,superAdmin')->group(function () {
+        Route::post('/gdpr', [GDPRController::class, 'store']);
+        Route::get('/gdpr', [GDPRController::class, 'index']);
+        Route::get('/gdpr/{public_id}', [GDPRController::class, 'show']);
+    });
 
     //Domande e risposte
     Route::middleware('role:admin,superAdmin')->group(function () {

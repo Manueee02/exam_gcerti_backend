@@ -31,19 +31,20 @@ class PlannedExamInscriptionController extends Controller
         $request->validate([
             'id_planned_exam' => 'required|exists:planned_exams,public_id',
             'id_candidate'    => 'required|exists:candidates,public_id',
+            'id_gdpr'         => 'required|exists:GDPR,public_id',
         ]);
 
         $plannedExam = PlannedExam::where('public_id', $request->id_planned_exam)->firstOrFail();
         $candidate   = \App\Models\Candidate::where('public_id', $request->id_candidate)->firstOrFail();
 
-        // 1️⃣ Controllo data (non oggi o passato)
+        // Controllo data (non oggi o passato)
         if (Carbon::parse($plannedExam->date)->startOfDay() <= Carbon::today()) {
             return response()->json([
                 'message' => 'Non puoi iscriverti a un esame con data odierna o passata'
             ], 422);
         }
 
-        // 2️⃣ Controllo iscrizione alla stessa tipologia esame
+        // Controllo iscrizione alla stessa tipologia esame
         $alreadySubscribed = PlannedExamInscription::where('id_candidate', $candidate->id)
             ->whereHas('plannedExam', function ($query) use ($plannedExam) {
                 $query->where('id_exam', $plannedExam->id_exam);
@@ -57,7 +58,7 @@ class PlannedExamInscriptionController extends Controller
             ], 422);
         }
 
-        // 3️⃣ Controllo duplicato esatto sulla stessa sessione
+        // Controllo duplicato esatto sulla stessa sessione
         $exists = PlannedExamInscription::where([
             'id_planned_exam' => $plannedExam->id,
             'id_candidate'    => $candidate->id,
@@ -69,12 +70,28 @@ class PlannedExamInscriptionController extends Controller
             return response()->json(['message' => 'Richiesta già esistente'], 422);
         }
 
-        // ✅ Creazione iscrizione
-        $inscription = PlannedExamInscription::create([
-            'id_planned_exam' => $plannedExam->id,
-            'id_candidate'    => $candidate->id,
-            'status'          => 'sended',
-        ]);
+        $gdpr = \App\Models\GDPR::where('public_id', $request->id_gdpr)->firstOrFail();
+
+        // Creazione iscrizione + firma GDPR in transazione atomica
+        $inscription = DB::transaction(function () use ($plannedExam, $candidate, $gdpr) {
+            $inscription = PlannedExamInscription::create([
+                'id_planned_exam' => $plannedExam->id,
+                'id_candidate'    => $candidate->id,
+                'status'          => 'sended',
+            ]);
+
+            \App\Models\GDPRSigned::create([
+                'id_GDPR'      => $gdpr->id,
+                'id_candidate' => $candidate->id,
+                'id_user'      => auth()->id(),
+                'id_exam'      => $plannedExam->id_exam,
+                'accepted_at'  => now(),
+                'accepted'     => 'true',
+                'date'         => now()->toDateString(),
+            ]);
+
+            return $inscription;
+        });
 
         $this->sendCandidateMail($inscription);
         $this->sendAdminMail($inscription);
@@ -142,9 +159,16 @@ class PlannedExamInscriptionController extends Controller
     /**
      * ISCRIZIONI PER CANDIDATO
      */
-    public function byCandidate(string $publicId)
+    public function byCandidate(Request $request, string $publicId)
     {
         $candidate = \App\Models\Candidate::where('public_id', $publicId)->firstOrFail();
+
+        // Lo user può vedere solo le proprie iscrizioni, ma l'admin e superAdmin possono vedere tutte le iscrizioni di tutti i candidati
+        $authUser = $request->user();
+        $authUser->loadMissing('role');
+        if ($authUser->role->name === 'user' && $candidate->id_user !== $authUser->id) {
+            return response()->json(['message' => 'Unauthorized'], 403);
+        }
 
         $inscriptions = PlannedExamInscription::with([
             'plannedExam.exam',
@@ -160,7 +184,7 @@ class PlannedExamInscriptionController extends Controller
                 'note'             => $i->note,
                 'document'         => $i->document,
                 'invoice'          => $i->invoice,
-                'unsigned_document'=> $i->unsigned_document,
+                'unsigned_document' => $i->unsigned_document,
                 'unsigned_invoice' => $i->unsigned_invoice,
                 'planned_exam'     => [
                     'public_id'   => $i->plannedExam->public_id,
@@ -280,7 +304,7 @@ class PlannedExamInscriptionController extends Controller
                 'residence_address' => $inscription->candidate->residence_address,
                 'residence_city'    => $inscription->candidate->residence_city,
                 'residence_country' => $inscription->candidate->residence_country,
-                'residence_province'=> $inscription->candidate->residence_province,
+                'residence_province' => $inscription->candidate->residence_province,
                 'residence_zip'     => $inscription->candidate->residence_zip,
                 'sex'               => $inscription->candidate->sex,
                 'media'             => $inscription->candidate->media,
@@ -469,17 +493,17 @@ class PlannedExamInscriptionController extends Controller
                     'surname'    => $inscription->candidate->surname,
                     'email'      => $inscription->candidate->email,
                     'active'     => $inscription->candidate->active,
-                    'birthcommun'=> $inscription->candidate->birthcommun,
-                    'birthcountry'=> $inscription->candidate->birthcountry,
+                    'birthcommun' => $inscription->candidate->birthcommun,
+                    'birthcountry' => $inscription->candidate->birthcountry,
                     'birthdate'  => $inscription->candidate->birthdate,
                     'birthplace' => $inscription->candidate->birthplace,
-                    'birthprovince'=> $inscription->candidate->birthprovince,
+                    'birthprovince' => $inscription->candidate->birthprovince,
                     'phone'      => $inscription->candidate->phone,
-                    'residence_address'=> $inscription->candidate->residence_address,
-                    'residence_city'=> $inscription->candidate->residence_city,
-                    'residence_country'=> $inscription->candidate->residence_country,
-                    'residence_province'=> $inscription->candidate->residence_province,
-                    'residence_zip'=> $inscription->candidate->residence_zip,
+                    'residence_address' => $inscription->candidate->residence_address,
+                    'residence_city' => $inscription->candidate->residence_city,
+                    'residence_country' => $inscription->candidate->residence_country,
+                    'residence_province' => $inscription->candidate->residence_province,
+                    'residence_zip' => $inscription->candidate->residence_zip,
                     'sex'        => $inscription->candidate->sex,
                     'media'      => $inscription->candidate->media, // torna esattamente come dalla relazione
                 ],
@@ -488,7 +512,6 @@ class PlannedExamInscriptionController extends Controller
                 'unsigned_document_media' => $inscription->unsignedDocumentMedia,
                 'unsigned_invoice_media'  => $inscription->unsignedInvoiceMedia,
             ]);
-
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['error' => $e->getMessage()], 400);

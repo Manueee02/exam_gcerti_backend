@@ -18,18 +18,23 @@ class GDPRSigned extends Model
     protected $fillable = [
         'id_GDPR',
         'id_candidate',
+        'id_exam',
+        'accepted_at',
         'date',
         'accepted',
         'preference',
+        'id_user',
     ];
 
     protected $casts = [
-        'id_GDPR' => 'integer',
+        'id_GDPR'      => 'integer',
         'id_candidate' => 'integer',
-        'date' => 'date',
-        'accepted' => 'boolean',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
+        'id_exam'      => 'integer',
+        'id_user'      => 'integer',
+        'accepted_at'  => 'datetime',
+        'date'         => 'date',
+        'created_at'   => 'datetime',
+        'updated_at'   => 'datetime',
     ];
 
     public function gdpr()
@@ -40,5 +45,10 @@ class GDPRSigned extends Model
     public function candidate()
     {
         return $this->belongsTo(Candidate::class, 'id_candidate', 'id');
+    }
+
+    public function exam()
+    {
+        return $this->belongsTo(Exam::class, 'id_exam', 'id');
     }
 }

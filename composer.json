@@ -11,6 +11,7 @@
         "laravel/tinker": "^2.10.1",
         "league/flysystem-aws-s3-v3": "3.0",
         "maatwebsite/excel": "^1.1",
+        "mews/purifier": "^3.4",
         "phpoffice/phpspreadsheet": "^5.7",
         "phpoffice/phpword": "^1.4",
         "tymon/jwt-auth": "^2.2"

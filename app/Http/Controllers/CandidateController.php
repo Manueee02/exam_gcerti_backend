@@ -66,9 +66,18 @@ class CandidateController extends Controller
             }
 
             $mesi = [
-                'A' => '01', 'B' => '02', 'C' => '03', 'D' => '04',
-                'E' => '05', 'H' => '06', 'L' => '07', 'M' => '08',
-                'P' => '09', 'R' => '10', 'S' => '11', 'T' => '12',
+                'A' => '01',
+                'B' => '02',
+                'C' => '03',
+                'D' => '04',
+                'E' => '05',
+                'H' => '06',
+                'L' => '07',
+                'M' => '08',
+                'P' => '09',
+                'R' => '10',
+                'S' => '11',
+                'T' => '12',
             ];
 
             if (!isset($mesi[$meseNascita])) {
@@ -117,12 +126,11 @@ class CandidateController extends Controller
                 'data_nascita'     => $dataNascita,
                 'sesso'            => $sesso,
                 'luogo_nascita'    => $luogoNascita,
-                'provincia_nascita'=> $provincia,
+                'provincia_nascita' => $provincia,
                 'anno_nascita'     => $annoCompleto,
                 'mese_nascita'     => intval($mese),
                 'giorno_nascita'   => $giorno,
             ];
-
         } catch (\Exception $e) {
             Log::error('[CandidateController] Eccezione durante la decodifica del codice fiscale.', [
                 'codice_fiscale' => $codiceFiscale,
@@ -185,7 +193,6 @@ class CandidateController extends Controller
         try {
             $citta = $this->estraiDati();
             return response()->json(['data' => ['citta' => $citta]], 200);
-
         } catch (\Exception $e) {
             Log::error('[CandidateController] Errore nel recupero dei dati città/comuni.', [
                 'exception' => $e->getMessage(),
@@ -235,7 +242,6 @@ class CandidateController extends Controller
                 'count'      => $mappedCandidates->count(),
                 'candidates' => $mappedCandidates,
             ], 200);
-
         } catch (\Throwable $e) {
             Log::error('[CandidateController] Errore nel recupero della lista candidati.', [
                 'exception' => $e->getMessage(),
@@ -295,7 +301,6 @@ class CandidateController extends Controller
             ];
 
             return response()->json(['success' => true, 'candidate' => $mappedCandidate], 200);
-
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
             Log::warning('[CandidateController] Accesso non autorizzato al candidato.', [
                 'public_id' => $id,
@@ -305,7 +310,6 @@ class CandidateController extends Controller
                 'success' => false,
                 'message' => 'Non autorizzato a visualizzare questo candidato.',
             ], 403);
-
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             Log::warning('[CandidateController] Candidato non trovato in show.', [
                 'public_id' => $id,
@@ -314,7 +318,6 @@ class CandidateController extends Controller
                 'success' => false,
                 'message' => 'Candidato non trovato.',
             ], 404);
-
         } catch (\Throwable $e) {
             Log::error('[CandidateController] Errore durante il recupero del candidato.', [
                 'public_id' => $id,
@@ -350,6 +353,7 @@ class CandidateController extends Controller
             'media'              => ['required', 'array', 'min:2'],
             'media.*.id_media'   => ['required', 'integer', 'exists:media,id'],
             'media.*.type'       => ['required', 'string', 'in:fiscal_code,id_document,curriculum'],
+            'id_gdpr'            => ['required', 'string', 'exists:GDPR,public_id'],
         ];
 
         $validator = Validator::make($request->all(), $baseRules);
@@ -399,6 +403,8 @@ class CandidateController extends Controller
                 ], 422);
             }
 
+            $gdpr = \App\Models\GDPR::where('public_id', $request->input('id_gdpr'))->firstOrFail();
+
             DB::beginTransaction();
 
             $user      = auth()->user();
@@ -424,8 +430,20 @@ class CandidateController extends Controller
                 'active'             => 'true',
             ]);
 
+            $candidate->refresh();
+
             $this->syncCompany($candidate->id, $billingType, $request);
             $this->syncMedia($candidate->id, $mediaItems);
+
+            \App\Models\GDPRSigned::create([
+                'id_GDPR'      => $gdpr->id,
+                'id_candidate' => $candidate->id,
+                'id_user'      => $user->id,
+                'id_exam'      => null,
+                'accepted_at'  => now(),
+                'accepted'     => 'true',
+                'date'         => now()->toDateString(),
+            ]);
 
             $user->candidate_registration_completed = 'true';
             $user->save();
@@ -435,7 +453,7 @@ class CandidateController extends Controller
             Log::info('[CandidateController] Candidato creato con successo.', [
                 'user_id'    => $user->id,
                 'public_id'  => $candidate->public_id,
-                'fiscal_code'=> $fiscalCode,
+                'fiscal_code' => $fiscalCode,
             ]);
 
             return response()->json([
@@ -443,7 +461,6 @@ class CandidateController extends Controller
                 'message'   => 'Candidato creato con successo.',
                 'candidate' => ['public_id' => $candidate->public_id],
             ], 201);
-
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('[CandidateController] Errore durante la creazione del candidato.', [
@@ -511,11 +528,22 @@ class CandidateController extends Controller
 
         try {
             $candidate->fill($request->only([
-                'name', 'surname', 'phone', 'fiscal_code', 'sex',
-                'birthdate', 'birthplace', 'birthprovince', 'birthcommun',
-                'residence_address', 'residence_city',
-                'residence_province', 'residence_zip', 'residence_country',
-                'is_foreign', 'birthcountry',
+                'name',
+                'surname',
+                'phone',
+                'fiscal_code',
+                'sex',
+                'birthdate',
+                'birthplace',
+                'birthprovince',
+                'birthcommun',
+                'residence_address',
+                'residence_city',
+                'residence_province',
+                'residence_zip',
+                'residence_country',
+                'is_foreign',
+                'birthcountry',
             ]));
             $candidate->save();
 
@@ -539,7 +567,6 @@ class CandidateController extends Controller
                 'message'   => 'Candidato aggiornato con successo.',
                 'candidate' => $candidate->fresh()->load(['user', 'companies', 'media.media']),
             ]);
-
         } catch (\Throwable $e) {
             DB::rollBack();
             Log::error('[CandidateController] Errore durante l\'aggiornamento del candidato.', [
@@ -657,9 +684,17 @@ class CandidateController extends Controller
         $data        = is_array($companyData)
             ? $companyData
             : $request->only([
-                'piva', 'company_piva', 'company_social_reason', 'company_mail',
-                'company_province', 'company_legal_address', 'company_city',
-                'company_phone', 'company_zip', 'is_foreign_company', 'company_foreign',
+                'piva',
+                'company_piva',
+                'company_social_reason',
+                'company_mail',
+                'company_province',
+                'company_legal_address',
+                'company_city',
+                'company_phone',
+                'company_zip',
+                'is_foreign_company',
+                'company_foreign',
             ]);
 
         if (isset($data['company_foreign'])) {
@@ -771,7 +806,6 @@ class CandidateController extends Controller
                 'count'   => $events->count(),
                 'events'  => $events,
             ], 200);
-
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
             Log::warning('[CandidateController] Accesso non autorizzato in getEvents.', [
                 'public_id' => $id,
@@ -781,7 +815,6 @@ class CandidateController extends Controller
                 'success' => false,
                 'message' => 'Non autorizzato a visualizzare gli eventi di questo candidato.',
             ], 403);
-
         } catch (\Throwable $e) {
             Log::error('[CandidateController] Errore durante il recupero degli eventi del candidato.', [
                 'public_id' => $id,
