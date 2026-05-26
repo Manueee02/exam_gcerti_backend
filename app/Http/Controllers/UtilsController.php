@@ -4,9 +4,9 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use App\Models\Auditor;
-use App\Models\Cab;
-use App\Models\Company;
+use App\Models\Candidate;
+use App\Models\Examiner;
+use App\Models\DecisionsMaker;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -31,10 +31,10 @@ class UtilsController extends Controller
         }
 
         $results = [
-            'auditors' => $this->searchAuditors($query),
-            'cabs' => $this->searchCabs($query),
-            'companies' => $this->searchCompanies($query),
-            'users' => $this->searchUsers($query)
+            'candidates'      => $this->searchCandidates($query),
+            'examiners'       => $this->searchExaminers($query),
+            'decisionsMakers' => $this->searchDecisionsMakers($query),
+            'users'           => $this->searchUsers($query),
         ];
 
         // Conta i risultati totali
@@ -49,108 +49,77 @@ class UtilsController extends Controller
     }
 
     /**
-     * Ricerca tra gli Auditor
+     * Ricerca tra i candidati
      *
      * @param string $query
      * @return array
      */
-    private function searchAuditors(string $query): array
+    private function searchCandidates(string $query): array
     {
-        $auditors = Auditor::where(function (Builder $q) use ($query) {
-            $q->where('id', 'LIKE', "%{$query}%")
-                ->orWhere('name', 'LIKE', "%{$query}%")
-                ->orWhere('surname', 'LIKE', "%{$query}%")
-                ->orWhere('phone', 'LIKE', "%{$query}%")
-                ->orWhere('email', 'LIKE', "%{$query}%")
-                ->orWhere('fiscal_code', 'LIKE', "%{$query}%")
-                ->orWhere('address', 'LIKE', "%{$query}%")
-                ->orWhere('city', 'LIKE', "%{$query}%")
-                ->orWhere('province', 'LIKE', "%{$query}%")
-                ->orWhere('birth_date', 'LIKE', "%{$query}%")
-                ->orWhere('birth_place', 'LIKE', "%{$query}%")
-                ->orWhere('birth_province', 'LIKE', "%{$query}%")
-                ->orWhere('postal_code', 'LIKE', "%{$query}%")
-                ->orWhere('id_cab', 'LIKE', "%{$query}%")
-                ->orWhere('instruction', 'LIKE', "%{$query}%")
-                ->orWhere('title_of_study', 'LIKE', "%{$query}%")
-                ->orWhere('type', 'LIKE', "%{$query}%")
-                ->orWhere('up_data_status', 'LIKE', "%{$query}%")
-                ->orWhere('consulting_experience', 'LIKE', "%{$query}%")
-                ->orWhere('management_system_experience', 'LIKE', "%{$query}%")
-                ->orWhere('working_experience', 'LIKE', "%{$query}%")
-                ->orWhere('access', 'LIKE', "%{$query}%");
+        return Candidate::where(function (Builder $q) use ($query) {
+            $q->where('name', 'ILIKE', "%{$query}%")
+                ->orWhere('surname', 'ILIKE', "%{$query}%")
+                ->orWhere('email', 'ILIKE', "%{$query}%")
+                ->orWhere('phone', 'ILIKE', "%{$query}%")
+                ->orWhere('fiscal_code', 'ILIKE', "%{$query}%")
+                ->orWhere('residence_city', 'ILIKE', "%{$query}%");
         })
-            ->with(['cab', 'qualifications', 'companies'])
+            ->select(['public_id', 'name', 'surname', 'email', 'phone', 'fiscal_code', 'active'])
             ->get()
-            ->map(function ($auditor) {
-                return [
-                    'type' => 'auditor',
-                    'id' => $auditor->id,
-                    'data' => $auditor->toArray()
-                ];
-            })
+            ->map(fn($c) => [
+                'type'      => 'candidate',
+                'public_id' => $c->public_id,
+                'data'      => $c->toArray(),
+            ])
             ->toArray();
-
-        return $auditors;
     }
 
     /**
-     * Ricerca tra i CAB
+     * Ricerca tra gli esaminatori
      *
      * @param string $query
      * @return array
      */
-    private function searchCabs(string $query): array
+    private function searchExaminers(string $query): array
     {
-        $cabs = Cab::where(function (Builder $q) use ($query) {
-            $q->where('id', 'LIKE', "%{$query}%")
-                ->orWhere('name', 'LIKE', "%{$query}%")
-                ->orWhere('description', 'LIKE', "%{$query}%");
+        return Examiner::where(function (Builder $q) use ($query) {
+            $q->where('name', 'ILIKE', "%{$query}%")
+                ->orWhere('surname', 'ILIKE', "%{$query}%")
+                ->orWhere('email', 'ILIKE', "%{$query}%")
+                ->orWhere('phone', 'ILIKE', "%{$query}%");
         })
+            ->select(['public_id', 'name', 'surname', 'email', 'phone', 'active'])
             ->get()
-            ->map(function ($cab) {
-                return [
-                    'type' => 'cab',
-                    'id' => $cab->id,
-                    'data' => $cab->toArray()
-                ];
-            })
+            ->map(fn($e) => [
+                'type'      => 'examiner',
+                'public_id' => $e->public_id,
+                'data'      => $e->toArray(),
+            ])
             ->toArray();
-
-        return $cabs;
     }
 
     /**
-     * Ricerca tra le Company
+     * Ricerca tra i deliberanti
      *
      * @param string $query
      * @return array
      */
-    private function searchCompanies(string $query): array
+    private function searchDecisionsMakers(string $query): array
     {
-        $companies = Company::where(function (Builder $q) use ($query) {
-            $q->where('id', 'LIKE', "%{$query}%")
-                ->orWhere('name', 'LIKE', "%{$query}%")
-                ->orWhere('email', 'LIKE', "%{$query}%")
-                ->orWhere('phone', 'LIKE', "%{$query}%")
-                ->orWhere('legal_site_address', 'LIKE', "%{$query}%")
-                ->orWhere('legal_site_city', 'LIKE', "%{$query}%")
-                ->orWhere('legal_site_postal_code', 'LIKE', "%{$query}%")
-                ->orWhere('fiscal_code', 'LIKE', "%{$query}%")
-                ->orWhere('piva', 'LIKE', "%{$query}%");
+        return DecisionsMaker::where(function (Builder $q) use ($query) {
+            $q->where('name', 'ILIKE', "%{$query}%")
+                ->orWhere('surname', 'ILIKE', "%{$query}%")
+                ->orWhere('email', 'ILIKE', "%{$query}%")
+                ->orWhere('phone', 'ILIKE', "%{$query}%");
         })
-            ->with(['auditors'])
+            ->select(['public_id', 'name', 'surname', 'email', 'phone', 'active'])
             ->get()
-            ->map(function ($company) {
-                return [
-                    'type' => 'company',
-                    'id' => $company->id,
-                    'data' => $company->toArray()
-                ];
-            })
+            ->map(fn($d) => [
+                'type'      => 'decisionsMaker',
+                'public_id' => $d->public_id,
+                'data'      => $d->toArray(),
+            ])
             ->toArray();
-
-        return $companies;
     }
 
     /**
@@ -161,26 +130,19 @@ class UtilsController extends Controller
      */
     private function searchUsers(string $query): array
     {
-        $users = User::where(function (Builder $q) use ($query) {
-            $q->where('id', 'LIKE', "%{$query}%")
-                ->orWhere('name', 'LIKE', "%{$query}%")
-                ->orWhere('email', 'LIKE', "%{$query}%")
-/*                ->orWhere('role', 'LIKE', "%{$query}%")*/
-                ->orWhere('first_access', 'LIKE', "%{$query}%");
+        return User::where(function (Builder $q) use ($query) {
+            $q->where('name', 'ILIKE', "%{$query}%")
+                ->orWhere('email', 'ILIKE', "%{$query}%");
         })
-            ->select(['id', 'name', 'email', 'id_role', 'first_access', 'created_at', 'updated_at']) // Escludi campi sensibili
+            ->select(['id', 'name', 'email', 'id_role', 'first_access', 'created_at', 'updated_at'])
             ->with(['role'])
             ->get()
-            ->map(function ($user) {
-                return [
-                    'type' => 'user',
-                    'id' => $user->id,
-                    'data' => $user->toArray()
-                ];
-            })
+            ->map(fn($u) => [
+                'type' => 'user',
+                'id'   => $u->id,
+                'data' => $u->toArray(),
+            ])
             ->toArray();
-
-        return $users;
     }
 
     /**
@@ -192,31 +154,28 @@ class UtilsController extends Controller
     public function advancedSearch(Request $request): JsonResponse
     {
         $query = $request->get('q', '');
-        $types = $request->get('types', ['auditors', 'cabs', 'companies', 'users']);
+        $types = $request->get('types', ['candidates', 'examiners', 'decisionsMakers', 'users']);
         $limit = $request->get('limit', 50);
 
         if (empty($query)) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Query di ricerca richiesta',
-                'data' => []
+                'data'    => []
             ], 400);
         }
 
         $results = [];
 
-        if (in_array('auditors', $types)) {
-            $results['auditors'] = array_slice($this->searchAuditors($query), 0, $limit);
+        if (in_array('candidates', $types)) {
+            $results['candidates'] = array_slice($this->searchCandidates($query), 0, $limit);
         }
-
-        if (in_array('cabs', $types)) {
-            $results['cabs'] = array_slice($this->searchCabs($query), 0, $limit);
+        if (in_array('examiners', $types)) {
+            $results['examiners'] = array_slice($this->searchExaminers($query), 0, $limit);
         }
-
-        if (in_array('companies', $types)) {
-            $results['companies'] = array_slice($this->searchCompanies($query), 0, $limit);
+        if (in_array('decisionsMakers', $types)) {
+            $results['decisionsMakers'] = array_slice($this->searchDecisionsMakers($query), 0, $limit);
         }
-
         if (in_array('users', $types)) {
             $results['users'] = array_slice($this->searchUsers($query), 0, $limit);
         }
@@ -224,12 +183,12 @@ class UtilsController extends Controller
         $totalResults = array_sum(array_map('count', $results));
 
         return response()->json([
-            'status' => 'success',
-            'query' => $query,
-            'types' => $types,
-            'limit' => $limit,
+            'status'        => 'success',
+            'query'         => $query,
+            'types'         => $types,
+            'limit'         => $limit,
             'total_results' => $totalResults,
-            'data' => $results
+            'data'          => $results
         ]);
     }
 }

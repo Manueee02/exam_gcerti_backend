@@ -31,7 +31,7 @@ class UserController extends Controller
             'id_role' => 'required|exists:user_roles,id',
         ]);
 
-        $user = User::where('public_id', $publicId)->firstOrFail();
+        $user = User::where('id', $publicId)->firstOrFail();
         $user->id_role = $request->id_role;
         $user->save();
 
@@ -46,7 +46,7 @@ class UserController extends Controller
      */
     public function destroy(string $publicId)
     {
-        $user = User::where('public_id', $publicId)->firstOrFail();
+        $user = User::where('id', $publicId)->firstOrFail();
         $user->delete();
 
         return response()->json(['message' => 'Utente eliminato con successo']);

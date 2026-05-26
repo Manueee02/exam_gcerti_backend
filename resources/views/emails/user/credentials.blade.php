@@ -40,7 +40,7 @@
 
             <div style="text-align: center; margin-top: 30px">
                 <a
-                    href="https://auditors.gcerti"
+                    href="{{ config('app.frontend_url') }}"
                     style="
                         display: inline-block;
                         background-color: #A11925;

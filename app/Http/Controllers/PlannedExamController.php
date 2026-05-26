@@ -50,6 +50,23 @@ class PlannedExamController extends Controller
             return response()->json(['message' => 'Errore nel recupero delle sessioni d\'esame'], 500);
         }
 
+        // Recupera candidato dell'utente corrente (solo ruolo 'user')
+        $currentUser = Auth::user();
+        $userCandidateId = null;
+        if ($currentUser) {
+            $currentUser->load('role', 'candidate');
+            if ($currentUser->role?->name === 'user' && $currentUser->candidate) {
+                $userCandidateId = $currentUser->candidate->id;
+            }
+        }
+
+        if ($userCandidateId) {
+            $plannedExams->load(['inscriptions' => function ($q) use ($userCandidateId) {
+                $q->where('id_candidate', $userCandidateId)
+                    ->whereNotIn('status', ['revoked', 'retired']);
+            }]);
+        }
+
         // Raccogli gli ID univoci presenti negli esami pianificati
         $examinerIds      = $plannedExams->pluck('id_examiner')->filter()->unique();
         $decisionMakerIds = $plannedExams->pluck('id_decision_maker')->filter()->unique();
@@ -86,7 +103,7 @@ class PlannedExamController extends Controller
             }
         }
 
-        $result = $plannedExams->map(function ($plannedExam) use ($examiners, $decisionMakers) {
+        $result = $plannedExams->map(function ($plannedExam) use ($examiners, $decisionMakers, $userCandidateId) {
             $exam          = $plannedExam->exam;
             $examiner      = $examiners->get($plannedExam->id_examiner);
             $decisionMaker = $decisionMakers->get($plannedExam->id_decision_maker);
@@ -116,6 +133,9 @@ class PlannedExamController extends Controller
                     : null,
                 'decision_maker' => $decisionMaker
                     ? ['public_id' => $decisionMaker['public_id'] ?? null]
+                    : null,
+                'already_enrolled' => $userCandidateId !== null
+                    ? $plannedExam->inscriptions->isNotEmpty()
                     : null,
             ];
         });
