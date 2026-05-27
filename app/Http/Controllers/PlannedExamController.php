@@ -379,6 +379,30 @@ class PlannedExamController extends Controller
             if (!$exam) {
                 return response()->json(['message' => 'Esame non trovato'], 404);
             }
+
+            // Verifica che esistano GDPR attivi specifici per questo esame (entrambi i tipi)
+            $inscriptionGdprExists = \App\Models\GDPR::where('type', 'inscription')
+                ->whereNull('id_exam')
+                ->whereHas('activeVersion')
+                ->exists();
+
+            if (!$inscriptionGdprExists) {
+                return response()->json([
+                    'message' => 'Impossibile creare la sessione: nessun GDPR attivo di tipo "inscription" configurato. Crea prima il GDPR necessario.',
+                ], 422);
+            }
+
+            // Verifica GDPR tipo exam (deve esistere uno specifico per questo esame)
+            $examGdprExists = \App\Models\GDPR::where('type', 'exam')
+                ->where('id_exam', $exam->id)
+                ->whereHas('activeVersion')
+                ->exists();
+
+            if (!$examGdprExists) {
+                return response()->json([
+                    'message' => "Impossibile creare la sessione per l'esame \"{$exam->name}\": nessun GDPR attivo configurato per questo esame. Crea prima il GDPR necessario.",
+                ], 422);
+            }
         } catch (\Exception $e) {
             Log::error('[PlannedExamController@store] Errore nel recupero dell\'esame', [
                 'id_exam' => $validated['id_exam'],

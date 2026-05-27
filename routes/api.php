@@ -218,6 +218,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         Route::post('/gdpr', [GDPRController::class, 'store']);
         Route::get('/gdpr', [GDPRController::class, 'index']);
         Route::get('/gdpr/{public_id}', [GDPRController::class, 'show']);
+        Route::post('/gdpr/{public_id}/versions', [GDPRController::class, 'storeVersion']);
     });
 
     //Domande e risposte

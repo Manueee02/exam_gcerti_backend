@@ -19,14 +19,11 @@ class GDPR extends Model
     protected $fillable = [
         'public_id',
         'title',
-        'text',
         'type',
         'id_exam',
-        'active',
     ];
 
     protected $casts = [
-        'active'     => 'boolean',
         'id_exam'    => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
@@ -51,13 +48,14 @@ class GDPR extends Model
         return $this->belongsTo(Exam::class, 'id_exam', 'id');
     }
 
-    public function signed()
+
+    public function versions()
     {
-        return $this->hasMany(GDPRSigned::class, 'id_GDPR', 'id');
+        return $this->hasMany(GDPRVersion::class, 'id_gdpr', 'id');
     }
 
-    public function signedExams()
+    public function activeVersion()
     {
-        return $this->hasMany(GDPRSignedExam::class, 'id_GDPR', 'id');
+        return $this->hasOne(GDPRVersion::class, 'id_gdpr', 'id')->where('active', true);
     }
 }

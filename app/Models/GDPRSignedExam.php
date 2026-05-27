@@ -34,7 +34,7 @@ class GDPRSignedExam extends Model
 
     public function gdpr()
     {
-        return $this->belongsTo(GDPR::class, 'id_GDPR', 'id');
+        return $this->belongsTo(GDPRVersion::class, 'id_GDPR', 'id');
     }
 
     public function candidateExam()

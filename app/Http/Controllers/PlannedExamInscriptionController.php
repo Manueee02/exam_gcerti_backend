@@ -31,7 +31,7 @@ class PlannedExamInscriptionController extends Controller
         $request->validate([
             'id_planned_exam' => 'required|exists:planned_exams,public_id',
             'id_candidate'    => 'required|exists:candidates,public_id',
-            'id_gdpr'         => 'required|exists:GDPR,public_id',
+            'id_gdpr'         => 'required|exists:gdpr_versions,public_id',
         ]);
 
         $plannedExam = PlannedExam::where('public_id', $request->id_planned_exam)->firstOrFail();
@@ -70,10 +70,10 @@ class PlannedExamInscriptionController extends Controller
             return response()->json(['message' => 'Richiesta già esistente'], 422);
         }
 
-        $gdpr = \App\Models\GDPR::where('public_id', $request->id_gdpr)->firstOrFail();
+        $gdprVersion = \App\Models\GDPRVersion::where('public_id', $request->id_gdpr)->firstOrFail();
 
         // Creazione iscrizione + firma GDPR in transazione atomica
-        $inscription = DB::transaction(function () use ($plannedExam, $candidate, $gdpr) {
+        $inscription = DB::transaction(function () use ($plannedExam, $candidate, $gdprVersion) {
             $inscription = PlannedExamInscription::create([
                 'id_planned_exam' => $plannedExam->id,
                 'id_candidate'    => $candidate->id,
@@ -81,7 +81,7 @@ class PlannedExamInscriptionController extends Controller
             ]);
 
             \App\Models\GDPRSigned::create([
-                'id_GDPR'      => $gdpr->id,
+                'id_GDPR'      => $gdprVersion->id,
                 'id_candidate' => $candidate->id,
                 'id_user'      => auth()->id(),
                 'id_exam'      => $plannedExam->id_exam,

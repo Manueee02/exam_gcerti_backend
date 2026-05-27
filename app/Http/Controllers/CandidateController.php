@@ -353,7 +353,7 @@ class CandidateController extends Controller
             'media'              => ['required', 'array', 'min:2'],
             'media.*.id_media'   => ['required', 'integer', 'exists:media,id'],
             'media.*.type'       => ['required', 'string', 'in:fiscal_code,id_document,curriculum'],
-            'id_gdpr'            => ['required', 'string', 'exists:GDPR,public_id'],
+            'id_gdpr'            => ['required', 'string', 'exists:gdpr_versions,public_id'],
         ];
 
         $validator = Validator::make($request->all(), $baseRules);
@@ -403,7 +403,7 @@ class CandidateController extends Controller
                 ], 422);
             }
 
-            $gdpr = \App\Models\GDPR::where('public_id', $request->input('id_gdpr'))->firstOrFail();
+            $gdprVersion = \App\Models\GDPRVersion::where('public_id', $request->input('id_gdpr'))->firstOrFail();
 
             DB::beginTransaction();
 
@@ -436,7 +436,7 @@ class CandidateController extends Controller
             $this->syncMedia($candidate->id, $mediaItems);
 
             \App\Models\GDPRSigned::create([
-                'id_GDPR'      => $gdpr->id,
+                'id_GDPR'      => $gdprVersion->id,
                 'id_candidate' => $candidate->id,
                 'id_user'      => $user->id,
                 'id_exam'      => null,
