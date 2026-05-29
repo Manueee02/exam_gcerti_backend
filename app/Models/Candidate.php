@@ -94,18 +94,4 @@ class Candidate extends Model
     {
         return $this->hasMany(GDPRSigned::class, 'id_candidate', 'id');
     }
-
-    public function gdprSignedExams()
-    {
-        return $this->hasManyThrough(
-            GDPRSignedExam::class,
-            CandidateExam::class,
-            'id_candidate', // FK in candidates_exams
-            'id_candidates_exam', // FK in GDPR_signed_exams
-            'id', // PK Candidate
-            'id'  // PK CandidateExam
-        );
-    }
-
-
 }

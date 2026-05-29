@@ -10,7 +10,7 @@ class GDPRVersion extends Model
 {
     use HasFactory;
 
-    protected $table = 'gdpr_versions';
+    protected $table = 'GDPR_versions';
     protected $primaryKey = 'id';
     public $incrementing = true;
     protected $keyType = 'int';
@@ -48,11 +48,6 @@ class GDPRVersion extends Model
 
     public function signed()
     {
-        return $this->hasMany(GDPRSigned::class, 'id_GDPR', 'id');
-    }
-
-    public function signedExams()
-    {
-        return $this->hasMany(GDPRSignedExam::class, 'id_GDPR', 'id');
+        return $this->hasMany(GDPRSigned::class, 'id_gdpr_version', 'id');
     }
 }

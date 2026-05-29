@@ -55,7 +55,7 @@ class GDPRController extends Controller
     public function active(Request $request)
     {
         $request->validate([
-            'type'    => 'required|in:inscription,exam',
+            'type'    => 'required|in:inscription,exam,cookie',
             'id_exam' => 'nullable|string',
         ]);
 
@@ -105,7 +105,7 @@ class GDPRController extends Controller
     {
         $validated = $request->validate([
             'title'   => 'required|string|max:255',
-            'type'    => 'required|in:inscription,exam',
+            'type'    => 'required|in:inscription,exam,cookie',
             'id_exam' => 'nullable|exists:exams,public_id',
             'text'    => 'required|string',
         ]);

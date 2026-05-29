@@ -42,6 +42,7 @@ Route::middleware('log.activity')->group(function () {
     Route::post('/reset-password', [AuthController::class, 'resetPassword']);
     Route::post('/verify-reset-token', [AuthController::class, 'verifyResetToken']);
     Route::post('/register', [RegisterController::class, 'register']);
+    Route::get('/gdpr/active', [GDPRController::class, 'active']);
     Route::get('/verify-email/{token}', [EmailVerificationController::class, 'verify']);
     Route::post('/resend-verification', [ResendVerificationController::class, 'resend']);
 });
@@ -213,7 +214,6 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
     Route::get('inscriptions/show/{public_id}', [PlannedExamInscriptionController::class, 'show']);
 
     //GDPR
-    Route::get('/gdpr/active', [GDPRController::class, 'active']);
     Route::middleware('role:admin,superAdmin')->group(function () {
         Route::post('/gdpr', [GDPRController::class, 'store']);
         Route::get('/gdpr', [GDPRController::class, 'index']);
