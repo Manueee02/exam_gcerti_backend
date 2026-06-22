@@ -3,18 +3,59 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Client\ConnectionException;
+use Throwable;
 
 class ExaminerService
 {
     public function getExaminer($publicId)
     {
-        $response = Http::withToken(config('services.app1.token'))
-            ->get(config('services.app1.url') . '/examiner/' . $publicId);
+        $url = config('services.app1.url') . '/examiner/' . $publicId;
 
-        return [
-            'status' => $response->getStatusCode(),
-            'data' => $response->json()
-        ];
+        try {
+            $response = Http::withToken(config('services.app1.token'))
+                ->get($url);
+
+            if (!$response->successful()) {
+                Log::warning('ExaminerService::getExaminer - App1 ha risposto con errore', [
+                    'public_id' => $publicId,
+                    'url' => $url,
+                    'status' => $response->status(),
+                    'response_body' => $response->json() ?? $response->body(),
+                ]);
+            }
+
+            return [
+                'status' => $response->getStatusCode(),
+                'data' => $response->json()
+            ];
+        } catch (ConnectionException $e) {
+            Log::error('ExaminerService::getExaminer - Connessione ad App1 fallita', [
+                'public_id' => $publicId,
+                'url' => $url,
+                'message' => $e->getMessage(),
+            ]);
+
+            return [
+                'status' => 503,
+                'data' => null,
+                'error' => 'Connessione ad App 1 fallita: ' . $e->getMessage(),
+            ];
+        } catch (Throwable $e) {
+            Log::error('ExaminerService::getExaminer - Errore inatteso', [
+                'public_id' => $publicId,
+                'url' => $url,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'status' => 500,
+                'data' => null,
+                'error' => 'Errore interno: ' . $e->getMessage(),
+            ];
+        }
     }
 
     public function getExaminers(array $filters = []): array
@@ -29,19 +70,53 @@ class ExaminerService
             $query['status'] = $filters['status'];
         }
 
-        $response = Http::withToken(config('services.app1.token'))
-            ->get(config('services.app1.url') . '/examiner', $query);
+        $url = config('services.app1.url') . '/examiner';
 
-        if (!$response->successful()) {
+        try {
+            $response = Http::withToken(config('services.app1.token'))
+                ->get($url, $query);
+
+            if (!$response->successful()) {
+                Log::warning('ExaminerService::getExaminers - App1 ha risposto con errore', [
+                    'url' => $url,
+                    'query' => $query,
+                    'status' => $response->status(),
+                    'response_body' => $response->json() ?? $response->body(),
+                ]);
+
+                return [
+                    'status' => $response->status(),
+                    'error' => 'Errore contattando App 1'
+                ];
+            }
+
             return [
                 'status' => $response->status(),
-                'error' => 'Errore contattando App 1'
+                'data' => $response->json()
+            ];
+        } catch (ConnectionException $e) {
+            Log::error('ExaminerService::getExaminers - Connessione ad App1 fallita', [
+                'url' => $url,
+                'query' => $query,
+                'message' => $e->getMessage(),
+            ]);
+
+            return [
+                'status' => 503,
+                'error' => 'Connessione ad App 1 fallita: ' . $e->getMessage(),
+            ];
+        } catch (Throwable $e) {
+            Log::error('ExaminerService::getExaminers - Errore inatteso', [
+                'url' => $url,
+                'query' => $query,
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return [
+                'status' => 500,
+                'error' => 'Errore interno: ' . $e->getMessage(),
             ];
         }
-
-        return [
-            'status' => $response->status(),
-            'data' => $response->json()
-        ];
     }
 }
