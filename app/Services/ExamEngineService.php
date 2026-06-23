@@ -257,6 +257,13 @@ class ExamEngineService
             ->orderBy('position')
             ->get();
 
+        // Non esporre MAI la risposta corretta al candidato
+        $questions->each(function ($cq) {
+            $cq->question->answers->each(function ($answer) {
+                $answer->makeHidden('is_correct');
+            });
+        });
+
         return [
             'session' => $session,
             'run' => $run,
@@ -326,7 +333,8 @@ class ExamEngineService
             /**
              * Controllo timeout
              */
-            $durationMinutes = 60;
+            $durationMinutes = \App\Models\Exam::where('id', $session->id_exam)
+                ->value('duration_minutes') ?? 60;
 
             if ($run->started_at) {
 
@@ -433,14 +441,29 @@ class ExamEngineService
             /**
              * Salvataggio risposta
              */
-            $savedAnswer = ExamSessionAnswer::create([
-                'id_exam_session' => $session->id,
-                'id_question' => $questionId,
-                'id_candidate' => $candidateId,
-                'answer' => $answer,
-                'is_correct' => $isCorrect,
-                'time_spent_seconds' => $timeSpentSeconds,
-            ]);
+            // DOPO
+            try {
+                $savedAnswer = ExamSessionAnswer::create([
+                    'id_exam_session' => $session->id,
+                    'id_question' => $questionId,
+                    'id_candidate' => $candidateId,
+                    'answer' => $answer,
+                    'is_correct' => $isCorrect,
+                    'time_spent_seconds' => $timeSpentSeconds,
+                ]);
+            } catch (\Illuminate\Database\QueryException $e) {
+                if ($e->getCode() === '23505') { // unique_violation Postgres
+                    $this->logEvent(
+                        $session->id,
+                        'DUPLICATE_ANSWER_ATTEMPT',
+                        'candidate',
+                        $candidateId,
+                        ['question_id' => $questionId]
+                    );
+                    throw new \Exception('Domanda già risposta');
+                }
+                throw $e;
+            }
 
             $this->logEvent(
                 $session->id,
@@ -451,7 +474,7 @@ class ExamEngineService
                     'question_id' => $questionId,
                     'is_correct' => $isCorrect,
                 ]
-            );
+        );
 
             return $savedAnswer;
         });
@@ -467,49 +490,33 @@ class ExamEngineService
         int $candidateId
     ): array {
 
-        $session = ExamSession::where(
-            'public_id',
-            $sessionPublicId
-        )->firstOrFail();
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
-        $answers = ExamSessionAnswer::where(
-            'id_exam_session',
-            $session->id
-        )
+        $answers = ExamSessionAnswer::where('id_exam_session', $session->id)
             ->where('id_candidate', $candidateId)
             ->get();
 
         $totalQuestions = $answers->count();
-
-        $correctAnswers = $answers
-            ->where('is_correct', true)
-            ->count();
+        $correctAnswers = $answers->where('is_correct', true)->count();
 
         $score = 0;
-
         if ($totalQuestions > 0) {
-
-            $score = round(
-                ($correctAnswers / $totalQuestions) * 100,
-                2
-            );
+            $score = round(($correctAnswers / $totalQuestions) * 100, 2);
         }
 
-        /**
-         * Chiusura run
-         */
-        $run = ExamSessionCandidateRun::where(
-            'id_exam_session',
-            $session->id
-        )
+        $passingThreshold = $this->resolvePassingThreshold($session->id_exam);
+        $passed = $score >= $passingThreshold;
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
             ->where('id_candidate', $candidateId)
             ->first();
 
         if ($run) {
-
             $run->update([
                 'status' => 'completed',
                 'ended_at' => now(),
+                'score' => $score,
+                'passed' => $passed,
             ]);
         }
 
@@ -522,6 +529,8 @@ class ExamEngineService
                 'score' => $score,
                 'correct_answers' => $correctAnswers,
                 'total_questions' => $totalQuestions,
+                'passing_threshold' => $passingThreshold,
+                'passed' => $passed,
             ]
         );
 
@@ -529,7 +538,30 @@ class ExamEngineService
             'total_questions' => $totalQuestions,
             'correct_answers' => $correctAnswers,
             'score' => $score,
+            'passing_threshold' => $passingThreshold,
+            'passed' => $passed,
         ];
+    }
+
+    /**
+     * Soglia di superamento globale = media pesata dei passing_score
+     * definiti per area/livello (exam_extraction_rules).
+     * Transitorio: in Fase 3 la valutazione diventerà per-step
+     * e questo metodo andrà sostituito.
+     */
+    private function resolvePassingThreshold(int $examId): float
+    {
+        $rules = ExamExtractionRule::whereHas('area', function ($q) use ($examId) {
+            $q->where('exam_id', $examId);
+        })->get();
+
+        if ($rules->isEmpty() || $rules->sum('n_questions') === 0) {
+            return 60.0; // fallback se non configurato
+        }
+
+        $weightedSum = $rules->sum(fn ($r) => $r->passing_score * $r->n_questions);
+
+        return round($weightedSum / $rules->sum('n_questions'), 2);
     }
 
     /**

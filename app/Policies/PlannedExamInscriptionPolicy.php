@@ -25,8 +25,10 @@ class PlannedExamInscriptionPolicy
         return false;
     }
 
+// DOPO
     public function forceStatusUpdate(User $user, PlannedExamInscription $inscription): bool
     {
-        return in_array($user->role, ['admin', 'superAdmin'], true);
+        $user->loadMissing('role');
+        return in_array($user->role->name, ['admin', 'superAdmin'], true);
     }
 }

@@ -3,16 +3,14 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\DB;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('media', function (Blueprint $table) {
-            $table->id(); // BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY
+            $table->increments('id');
             $table->string('original_name', 500);
             $table->string('url', 500);
             $table->string('path', 500);
@@ -20,13 +18,14 @@ return new class extends Migration
             $table->string('md5_hash', 100);
             $table->string('size', 500);
             $table->string('disk', 500);
-            $table->timestamps(); // crea created_at e updated_at
+            $table->timestamp('created_at')->nullable();
+            $table->timestamp('updated_at')->nullable();
+            $table->timestamp('pending_delete_at')->nullable();
+            $table->boolean('is_temporary')->nullable()->default(false);
+            $table->uuid('public_id')->default(DB::raw('gen_random_uuid()'));
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('media');

@@ -252,7 +252,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         });
 
     //Exam Engine
-    Route::middleware('role:admin,superAdmin')
+    Route::middleware('role:admin,superAdmin,examiner')
         ->prefix('exam-sessions')->group(function () {
             Route::post('/start/{plannedExamPublicId}', [ExamSessionController::class, 'start']);
             Route::post('/end/{sessionPublicId}', [ExamSessionController::class, 'end']);
