@@ -39,9 +39,15 @@ class ExamEngineService
              * Controllo apertura sessione:
              * massimo 10 minuti prima dell'inizio
              */
-            $examDateTime = Carbon::parse(
-                $plannedExam->date . ' ' . $plannedExam->time
-            );
+            $datePart = $plannedExam->date instanceof \Carbon\Carbon
+                ? $plannedExam->date->format('Y-m-d')
+                : (string) $plannedExam->date;
+
+            $timePart = $plannedExam->time instanceof \Carbon\Carbon
+                ? $plannedExam->time->format('H:i:s')
+                : (string) $plannedExam->time;
+
+            $examDateTime = Carbon::parse($datePart . ' ' . $timePart);
 
             $allowedStart = $examDateTime->copy()->subMinutes(10);
 
@@ -135,6 +141,8 @@ class ExamEngineService
                     ]
                 );
             }
+
+            $session->refresh();
 
             return $session;
         });
@@ -284,164 +292,82 @@ class ExamEngineService
         ?int $timeSpentSeconds = null
     ): ExamSessionAnswer {
 
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        if ($session->status !== 'live') {
+            throw new \Exception('La sessione è chiusa');
+        }
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->firstOrFail();
+
+        if ($run->status !== 'in_progress') {
+            throw new \Exception('Esame non attivo per il candidato');
+        }
+
+        // Controlli con side-effect (update + log) che devono persistere
+        // ANCHE se subito dopo lanciamo eccezione: restano fuori da
+        // qualunque transazione, così non vengono annullati da un rollback.
+        $durationMinutes = \App\Models\Exam::where('id', $session->id_exam)
+            ->value('duration_minutes') ?? 60;
+
+        if ($run->started_at) {
+            $endTime = Carbon::parse($run->started_at)->addMinutes($durationMinutes);
+
+            if (now()->gt($endTime)) {
+                $run->update(['status' => 'timeout', 'ended_at' => now()]);
+                $this->logEvent($session->id, 'EXAM_TIMEOUT', 'system', $candidateId);
+                throw new \Exception('Tempo esame terminato');
+            }
+        }
+
+        $assignedQuestion = ExamSessionCandidateQuestion::where('id_question', $questionId)
+            ->where('id_candidate_run', $run->id)
+            ->exists();
+
+        if (!$assignedQuestion) {
+            $this->logEvent(
+                $session->id,
+                'UNAUTHORIZED_QUESTION_ACCESS',
+                'candidate',
+                $candidateId,
+                ['question_id' => $questionId]
+            );
+            throw new \Exception('Domanda non assegnata');
+        }
+
+        $alreadyAnswered = ExamSessionAnswer::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->where('id_question', $questionId)
+            ->exists();
+
+        if ($alreadyAnswered) {
+            $this->logEvent(
+                $session->id,
+                'DUPLICATE_ANSWER_ATTEMPT',
+                'candidate',
+                $candidateId,
+                ['question_id' => $questionId]
+            );
+            throw new \Exception('Domanda già risposta');
+        }
+
+        $correctAnswer = Answer::where('id_question', $questionId)
+            ->where('is_correct', 'true')
+            ->first();
+
+        $isCorrect = false;
+        if ($correctAnswer) {
+            $selectedAnswerId = $answer['answer_id'] ?? null;
+            $isCorrect = ($correctAnswer->id == $selectedAnswerId);
+        }
+
+        // Solo la scrittura finale resta in transazione: serve a coprire
+        // la race condition sul vincolo unique (Fix 4), non i controlli sopra.
         return DB::transaction(function () use (
-            $sessionPublicId,
-            $candidateId,
-            $questionId,
-            $answer,
-            $timeSpentSeconds
+            $session, $candidateId, $questionId, $answer, $isCorrect, $timeSpentSeconds
         ) {
-
-            /**
-             * Recupero sessione
-             */
-            $session = ExamSession::where(
-                'public_id',
-                $sessionPublicId
-            )->firstOrFail();
-
-            /**
-             * Sessione deve essere live
-             */
-            if ($session->status !== 'live') {
-
-                throw new \Exception(
-                    'La sessione è chiusa'
-                );
-            }
-
-            /**
-             * Recupero run candidato
-             */
-            $run = ExamSessionCandidateRun::where(
-                'id_exam_session',
-                $session->id
-            )
-                ->where('id_candidate', $candidateId)
-                ->firstOrFail();
-
-            /**
-             * Deve essere in esecuzione
-             */
-            if ($run->status !== 'in_progress') {
-
-                throw new \Exception(
-                    'Esame non attivo per il candidato'
-                );
-            }
-
-            /**
-             * Controllo timeout
-             */
-            $durationMinutes = \App\Models\Exam::where('id', $session->id_exam)
-                ->value('duration_minutes') ?? 60;
-
-            if ($run->started_at) {
-
-                $endTime = Carbon::parse(
-                    $run->started_at
-                )->addMinutes($durationMinutes);
-
-                if (now()->gt($endTime)) {
-
-                    $run->update([
-                        'status' => 'timeout',
-                        'ended_at' => now(),
-                    ]);
-
-                    $this->logEvent(
-                        $session->id,
-                        'EXAM_TIMEOUT',
-                        'system',
-                        $candidateId
-                    );
-
-                    throw new \Exception(
-                        'Tempo esame terminato'
-                    );
-                }
-            }
-
-            /**
-             * Controllo domanda assegnata
-             */
-            $assignedQuestion = ExamSessionCandidateQuestion::where(
-                'id_question',
-                $questionId
-            )
-                ->where('id_candidate_run', $run->id)
-                ->exists();
-
-            if (!$assignedQuestion) {
-
-                $this->logEvent(
-                    $session->id,
-                    'UNAUTHORIZED_QUESTION_ACCESS',
-                    'candidate',
-                    $candidateId,
-                    [
-                        'question_id' => $questionId,
-                    ]
-                );
-
-                throw new \Exception(
-                    'Domanda non assegnata'
-                );
-            }
-
-            /**
-             * Evita doppie risposte
-             */
-            $alreadyAnswered = ExamSessionAnswer::where(
-                'id_exam_session',
-                $session->id
-            )
-                ->where('id_candidate', $candidateId)
-                ->where('id_question', $questionId)
-                ->exists();
-
-            if ($alreadyAnswered) {
-
-                $this->logEvent(
-                    $session->id,
-                    'DUPLICATE_ANSWER_ATTEMPT',
-                    'candidate',
-                    $candidateId,
-                    [
-                        'question_id' => $questionId,
-                    ]
-                );
-
-                throw new \Exception(
-                    'Domanda già risposta'
-                );
-            }
-
-            /**
-             * Recupero risposta corretta
-             */
-            $correctAnswer = Answer::where(
-                'id_question',
-                $questionId
-            )
-                ->where('is_correct', 'true')
-                ->first();
-
-            $isCorrect = false;
-
-            if ($correctAnswer) {
-
-                $selectedAnswerId = $answer['answer_id'] ?? null;
-
-                $isCorrect = (
-                    $correctAnswer->id == $selectedAnswerId
-                );
-            }
-
-            /**
-             * Salvataggio risposta
-             */
-            // DOPO
             try {
                 $savedAnswer = ExamSessionAnswer::create([
                     'id_exam_session' => $session->id,
@@ -452,7 +378,7 @@ class ExamEngineService
                     'time_spent_seconds' => $timeSpentSeconds,
                 ]);
             } catch (\Illuminate\Database\QueryException $e) {
-                if ($e->getCode() === '23505') { // unique_violation Postgres
+                if ($e->getCode() === '23505') {
                     $this->logEvent(
                         $session->id,
                         'DUPLICATE_ANSWER_ATTEMPT',
@@ -470,11 +396,10 @@ class ExamEngineService
                 'ANSWER_SUBMITTED',
                 'candidate',
                 $candidateId,
-                [
-                    'question_id' => $questionId,
-                    'is_correct' => $isCorrect,
-                ]
-        );
+                ['question_id' => $questionId, 'is_correct' => $isCorrect]
+            );
+
+            $savedAnswer->makeHidden('is_correct');
 
             return $savedAnswer;
         });

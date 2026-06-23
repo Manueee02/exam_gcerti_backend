@@ -19,6 +19,7 @@ return new class extends Migration
             $table->boolean('is_correct')->nullable();
             $table->integer('time_spent_seconds')->nullable();
             $table->timestamp('created_at')->nullable()->default(DB::raw('now()'));
+            $table->timestamp('updated_at')->nullable()->default(DB::raw('now()'));
 
             // Fix 4 (gia' applicato manualmente sul DB dev, qui replicato)
             $table->unique(['id_exam_session', 'id_candidate', 'id_question'], 'uq_session_candidate_question');

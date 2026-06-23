@@ -14,6 +14,8 @@ class ExamSessionCandidateRun extends Model
         'current_step',
         'started_at',
         'ended_at',
+        'score',
+        'passed'
     ];
 
     protected $casts = [

@@ -78,6 +78,99 @@ class ExamEngineServiceTest extends TestCase
         return compact('exam', 'area', 'level', 'questions', 'plannedExam', 'candidateRecord');
     }
 
+    /**
+     * Replica la struttura reale dell'esame DigComp 2.2:
+     * 5 aree (a1-a5), ciascuna con 6 livelli (b1,b2,i3,i4,a5,a6),
+     * con le stesse extraction rules in uso in produzione.
+     */
+    private function setupRealDigCompScenario(): array
+    {
+        $exam = Exam::factory()->create([
+            'type' => 'digicomp',
+            'name' => 'Digcomp 2.2',
+            'duration_minutes' => 50,
+            'color' => 'violet',
+        ]);
+
+        $areeTemplate = [
+            ['name' => 'a1', 'label' => 'Alfabetizzazione su informazione e dati'],
+            ['name' => 'a2', 'label' => 'Comunicazione e collaborazione'],
+            ['name' => 'a3', 'label' => 'Creazione di contenuti digitali'],
+            ['name' => 'a4', 'label' => 'Sicurezza'],
+            ['name' => 'a5', 'label' => 'Risolvere problemi'],
+        ];
+
+        // Stesso pattern di livelli ripetuto identico per ogni area
+        // (valori presi 1:1 dal dump di exam_extraction_rules)
+        $livelliTemplate = [
+            ['name' => 'b1', 'label' => 'B1', 'order' => 0, 'n_questions' => 2, 'duration_minutes' => 3, 'passing_score' => 2],
+            ['name' => 'b2', 'label' => 'B2', 'order' => 1, 'n_questions' => 2, 'duration_minutes' => 3, 'passing_score' => 2],
+            ['name' => 'i3', 'label' => 'I3', 'order' => 2, 'n_questions' => 2, 'duration_minutes' => 4, 'passing_score' => 2],
+            ['name' => 'i4', 'label' => 'I4', 'order' => 3, 'n_questions' => 2, 'duration_minutes' => 4, 'passing_score' => 2],
+            ['name' => 'a5', 'label' => 'A5', 'order' => 4, 'n_questions' => 4, 'duration_minutes' => 6, 'passing_score' => 3],
+            ['name' => 'a6', 'label' => 'A6', 'order' => 5, 'n_questions' => 4, 'duration_minutes' => 6, 'passing_score' => 2],
+        ];
+
+        foreach ($areeTemplate as $areaIndex => $areaData) {
+            $area = ExamArea::factory()->create([
+                'exam_id' => $exam->id,
+                'name' => $areaData['name'],
+                'label' => $areaData['label'],
+                'order' => $areaIndex,
+            ]);
+
+            foreach ($livelliTemplate as $livelloData) {
+                $level = ExamLevel::factory()->create([
+                    'exam_area_id' => $area->id,
+                    'name' => $livelloData['name'],
+                    'label' => $livelloData['label'],
+                    'order' => $livelloData['order'],
+                ]);
+
+                ExamExtractionRule::factory()->create([
+                    'exam_area_id' => $area->id,
+                    'exam_level_id' => $level->id,
+                    'n_questions' => $livelloData['n_questions'],
+                    'duration_minutes' => $livelloData['duration_minutes'],
+                    'passing_score' => $livelloData['passing_score'],
+                ]);
+
+                // Esattamente n_questions disponibili: nessun margine.
+                // Verifica anche che il motore non richieda più del necessario.
+                $questions = Question::factory()
+                    ->count($livelloData['n_questions'])
+                    ->create([
+                        'exam_id' => $exam->id,
+                        'exam_area_id' => $area->id,
+                        'exam_level_id' => $level->id,
+                    ]);
+
+                foreach ($questions as $question) {
+                    Answer::factory()->create([
+                        'id_question' => $question->id,
+                        'is_correct' => 'true',
+                    ]);
+                    Answer::factory()->count(3)->create([
+                        'id_question' => $question->id,
+                        'is_correct' => 'false',
+                    ]);
+                }
+            }
+        }
+
+        $plannedExam = PlannedExam::factory()->create([
+            'id_exam' => $exam->id,
+            'date' => Carbon::now()->format('Y-m-d'),
+            'time' => Carbon::now()->addMinutes(5)->format('H:i:s'),
+        ]);
+
+        $candidateRecord = PlannedExamCandidate::factory()->create([
+            'id_planned_exam' => $plannedExam->id,
+        ]);
+
+        return compact('exam', 'plannedExam', 'candidateRecord');
+    }
+
     // ────────────────────────────────────────────────
     // FASE 1/2 — comportamento base
     // ────────────────────────────────────────────────
@@ -304,5 +397,29 @@ class ExamEngineServiceTest extends TestCase
             'answer' => ['answer_id' => 1],
             'is_correct' => false,
         ]);
+    }
+
+    public function test_avvia_sessione_con_struttura_digcomp_reale(): void
+    {
+        $s = $this->setupRealDigCompScenario();
+
+        $session = $this->engine->startSession($s['plannedExam']->public_id);
+
+        $this->assertEquals('live', $session->status);
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $s['candidateRecord']->id_candidate)
+            ->first();
+
+        // 5 aree x (2+2+2+2+4+4) domande per area = 80 domande totali
+        $totalAssigned = ExamSessionCandidateQuestion::where('id_candidate_run', $run->id)->count();
+
+        $this->assertEquals(80, $totalAssigned);
+
+        $this->assertTrue(
+            ExamSessionLog::where('id_exam_session', $session->id)
+                ->where('event_type', 'QUESTIONS_ASSIGNED')
+                ->exists()
+        );
     }
 }
