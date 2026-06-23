@@ -134,19 +134,6 @@ class ExamEngineService
                     ]);
                 }
 
-                $firstGroup = $this->resolveFirstGroup($plannedExam->id_exam);
-
-                if ($firstGroup === null) {
-                    throw new \Exception('Esame non configurato correttamente: nessuna area/livello con regole di estrazione');
-                }
-
-                $run->update([
-                    'current_exam_area_id' => $firstGroup['area']->id,
-                    'current_exam_level_id' => $firstGroup['level']->id,
-                    'current_step_started_at' => now(),
-                    'current_step' => 1,
-                ]);
-
                 $this->logEvent(
                     $session->id,
                     'QUESTIONS_ASSIGNED',
@@ -155,6 +142,32 @@ class ExamEngineService
                     [
                         'questions_count' => count($questions),
                     ]
+                );
+
+                /**
+                 * Imposto il primo gruppo (area+livello) da cui parte
+                 * la scalata del candidato.
+                 */
+                $firstGroup = $this->resolveFirstGroup($plannedExam->id_exam);
+
+                if ($firstGroup === null) {
+                    throw new \Exception(
+                        'Esame non configurato correttamente: nessuna area/livello con regole di estrazione'
+                    );
+                }
+
+                $run->update([
+                    'current_exam_area_id' => $firstGroup['area']->id,
+                    'current_exam_level_id' => $firstGroup['level']->id,
+                    'current_step_started_at' => now(),
+                ]);
+
+                $this->logEvent(
+                    $session->id,
+                    'LEVEL_STARTED',
+                    'system',
+                    $candidate->id_candidate,
+                    ['exam_area_id' => $firstGroup['area']->id, 'exam_level_id' => $firstGroup['level']->id]
                 );
             }
 
@@ -210,25 +223,65 @@ class ExamEngineService
      * GET CANDIDATE EXAM
      * =========================================================
      */
-    public function getCandidateExam(string $sessionPublicId, int $candidateId): array
-    {
-        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+    public function getCandidateExam(
+        string $sessionPublicId,
+        int $candidateId
+    ): array {
 
+        $session = ExamSession::where(
+            'public_id',
+            $sessionPublicId
+        )->firstOrFail();
+
+        /**
+         * Sessione deve essere live
+         */
         if ($session->status !== 'live') {
-            throw new \Exception('La sessione non è attiva');
+
+            throw new \Exception(
+                'La sessione non è attiva'
+            );
         }
 
-        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+        /**
+         * Recupero run candidato
+         */
+        $run = ExamSessionCandidateRun::where(
+            'id_exam_session',
+            $session->id
+        )
             ->where('id_candidate', $candidateId)
             ->firstOrFail();
 
-        if (!in_array($run->status, ['authorized', 'in_progress'])) {
-            throw new \Exception('Candidato non autorizzato');
+        /**
+         * Candidato deve essere autorizzato
+         */
+        if (!in_array($run->status, [
+            'authorized',
+            'in_progress'
+        ])) {
+
+            throw new \Exception(
+                'Candidato non autorizzato'
+            );
         }
 
+        /**
+         * Avvio esame
+         */
         if ($run->status === 'authorized') {
-            $run->update(['status' => 'in_progress', 'started_at' => now()]);
-            $this->logEvent($session->id, 'CANDIDATE_STARTED_EXAM', 'candidate', $candidateId);
+
+            $run->update([
+                'status' => 'in_progress',
+                'started_at' => now(),
+            ]);
+
+            $this->logEvent(
+                $session->id,
+                'CANDIDATE_STARTED_EXAM',
+                'candidate',
+                $candidateId
+            );
         }
 
         $this->ensureGlobalTimeNotExpired($session, $run);
@@ -241,11 +294,16 @@ class ExamEngineService
                 'exam_completed' => true,
                 'current_area' => null,
                 'current_level' => null,
-                'questions' => [],
+                'questions' => collect(),
             ];
         }
 
-        $questions = ExamSessionCandidateQuestion::with(['question.answers'])
+        /**
+         * Recupero SOLO le domande del gruppo (area+livello) corrente
+         */
+        $questions = ExamSessionCandidateQuestion::with([
+            'question.answers'
+        ])
             ->where('id_candidate_run', $run->id)
             ->whereHas('question', function ($q) use ($run) {
                 $q->where('exam_area_id', $run->current_exam_area_id)
@@ -254,8 +312,11 @@ class ExamEngineService
             ->orderBy('position')
             ->get();
 
+        // Non esporre MAI la risposta corretta al candidato
         $questions->each(function ($cq) {
-            $cq->question->answers->each(fn ($a) => $a->makeHidden('is_correct'));
+            $cq->question->answers->each(function ($answer) {
+                $answer->makeHidden('is_correct');
+            });
         });
 
         $rule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
@@ -270,7 +331,7 @@ class ExamEngineService
             'exam_completed' => false,
             'current_area' => ExamArea::find($run->current_exam_area_id),
             'current_level' => ExamLevel::find($run->current_exam_level_id),
-            'level_ends_at' => $rule && $run->current_step_started_at
+            'level_ends_at' => ($rule && $run->current_step_started_at)
                 ? Carbon::parse($run->current_step_started_at)->addMinutes($rule->duration_minutes)
                 : null,
             'exam_ends_at' => $run->started_at
@@ -307,6 +368,9 @@ class ExamEngineService
             throw new \Exception('Esame non attivo per il candidato');
         }
 
+        // Controlli con side-effect (update + log) che devono persistere
+        // ANCHE se subito dopo lanciamo eccezione: restano fuori da
+        // qualunque transazione, così non vengono annullati da un rollback.
         $this->ensureGlobalTimeNotExpired($session, $run);
         $run = $this->ensureCurrentGroupIsValid($run, $session);
 
@@ -318,11 +382,14 @@ class ExamEngineService
 
         if (
             !$question ||
-            $question->exam_area_id !== $run->current_exam_area_id ||
-            $question->exam_level_id !== $run->current_exam_level_id
+            (int) $question->exam_area_id !== (int) $run->current_exam_area_id ||
+            (int) $question->exam_level_id !== (int) $run->current_exam_level_id
         ) {
             $this->logEvent(
-                $session->id, 'UNAUTHORIZED_QUESTION_ACCESS', 'candidate', $candidateId,
+                $session->id,
+                'UNAUTHORIZED_QUESTION_ACCESS',
+                'candidate',
+                $candidateId,
                 ['question_id' => $questionId, 'reason' => 'fuori dal livello corrente']
             );
             throw new \Exception('Domanda non appartenente al livello corrente');
@@ -334,7 +401,10 @@ class ExamEngineService
 
         if (!$assignedQuestion) {
             $this->logEvent(
-                $session->id, 'UNAUTHORIZED_QUESTION_ACCESS', 'candidate', $candidateId,
+                $session->id,
+                'UNAUTHORIZED_QUESTION_ACCESS',
+                'candidate',
+                $candidateId,
                 ['question_id' => $questionId]
             );
             throw new \Exception('Domanda non assegnata');
@@ -347,7 +417,10 @@ class ExamEngineService
 
         if ($alreadyAnswered) {
             $this->logEvent(
-                $session->id, 'DUPLICATE_ANSWER_ATTEMPT', 'candidate', $candidateId,
+                $session->id,
+                'DUPLICATE_ANSWER_ATTEMPT',
+                'candidate',
+                $candidateId,
                 ['question_id' => $questionId]
             );
             throw new \Exception('Domanda già risposta');
@@ -363,6 +436,8 @@ class ExamEngineService
             $isCorrect = ($correctAnswer->id == $selectedAnswerId);
         }
 
+        // Solo la scrittura finale resta in transazione: serve a coprire
+        // la race condition sul vincolo unique (Fix 4), non i controlli sopra.
         $savedAnswer = DB::transaction(function () use (
             $session, $candidateId, $questionId, $answer, $isCorrect, $timeSpentSeconds, $run
         ) {
@@ -379,7 +454,10 @@ class ExamEngineService
             } catch (\Illuminate\Database\QueryException $e) {
                 if ($e->getCode() === '23505') {
                     $this->logEvent(
-                        $session->id, 'DUPLICATE_ANSWER_ATTEMPT', 'candidate', $candidateId,
+                        $session->id,
+                        'DUPLICATE_ANSWER_ATTEMPT',
+                        'candidate',
+                        $candidateId,
                         ['question_id' => $questionId]
                     );
                     throw new \Exception('Domanda già risposta');
@@ -388,13 +466,20 @@ class ExamEngineService
             }
 
             $this->logEvent(
-                $session->id, 'ANSWER_SUBMITTED', 'candidate', $candidateId,
+                $session->id,
+                'ANSWER_SUBMITTED',
+                'candidate',
+                $candidateId,
                 ['question_id' => $questionId, 'is_correct' => $isCorrect]
             );
 
             return $saved;
         });
 
+        /**
+         * Se il candidato ha risposto a tutte le domande previste
+         * dalla regola del gruppo corrente, chiudo il gruppo e avanzo.
+         */
         $rule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
             ->where('exam_level_id', $run->current_exam_level_id)
             ->first();
@@ -424,8 +509,11 @@ class ExamEngineService
      * CALCULATE SCORE
      * =========================================================
      */
-    public function calculateScore(string $sessionPublicId, int $candidateId): array
-    {
+    public function calculateScore(
+        string $sessionPublicId,
+        int $candidateId
+    ): array {
+
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
         $areas = $this->getOrderedAreasWithRules($session->id_exam);
@@ -459,30 +547,15 @@ class ExamEngineService
             ];
         }
 
-        $this->logEvent($session->id, 'REPORT_GENERATED', 'system', $candidateId, ['report' => $report]);
+        $this->logEvent(
+            $session->id,
+            'REPORT_GENERATED',
+            'system',
+            $candidateId,
+            ['report' => $report]
+        );
 
         return ['areas' => $report];
-    }
-
-    /**
-     * Soglia di superamento globale = media pesata dei passing_score
-     * definiti per area/livello (exam_extraction_rules).
-     * Transitorio: in Fase 3 la valutazione diventerà per-step
-     * e questo metodo andrà sostituito.
-     */
-    private function resolvePassingThreshold(int $examId): float
-    {
-        $rules = ExamExtractionRule::whereHas('area', function ($q) use ($examId) {
-            $q->where('exam_id', $examId);
-        })->get();
-
-        if ($rules->isEmpty() || $rules->sum('n_questions') === 0) {
-            return 60.0; // fallback se non configurato
-        }
-
-        $weightedSum = $rules->sum(fn ($r) => $r->passing_score * $r->n_questions);
-
-        return round($weightedSum / $rules->sum('n_questions'), 2);
     }
 
     /**
@@ -596,38 +669,12 @@ class ExamEngineService
 
     /**
      * =========================================================
-     * SESSION LOGGING
+     * AREA/LEVEL STATE MACHINE
      * =========================================================
+     * Modulare: funziona per qualunque esame, indipendentemente
+     * dal numero di aree o livelli configurati. Si basa solo su
+     * exam_areas.order, exam_levels.order e exam_extraction_rules.
      */
-    private function logEvent(
-        int $sessionId,
-        string $eventType,
-        string $actorType,
-        ?int $actorId = null,
-        ?array $payload = null
-    ): void {
-
-        try {
-
-            ExamSessionLog::create([
-                'id_exam_session' => $sessionId,
-                'event_type' => $eventType,
-                'actor_type' => $actorType,
-                'actor_id' => $actorId,
-                'payload' => $payload,
-            ]);
-
-        } catch (\Throwable $e) {
-
-            Log::error(
-                'Exam session log error',
-                [
-                    'message' => $e->getMessage(),
-                    'session_id' => $sessionId,
-                ]
-            );
-        }
-    }
 
     private function getOrderedAreasWithRules(int $examId): \Illuminate\Support\Collection
     {
@@ -666,7 +713,7 @@ class ExamEngineService
     {
         if ($passed) {
             $levelsInArea = $this->getOrderedLevelsForArea($currentAreaId);
-            $currentIndex = $levelsInArea->search(fn ($l) => $l->id === $currentLevelId);
+            $currentIndex = $levelsInArea->search(fn ($l) => (int) $l->id === (int) $currentLevelId);
 
             if ($currentIndex !== false && isset($levelsInArea[$currentIndex + 1])) {
                 return [
@@ -678,7 +725,7 @@ class ExamEngineService
         }
 
         $areas = $this->getOrderedAreasWithRules($examId);
-        $areaIndex = $areas->search(fn ($a) => $a->id === $currentAreaId);
+        $areaIndex = $areas->search(fn ($a) => (int) $a->id === (int) $currentAreaId);
 
         if ($areaIndex === false || !isset($areas[$areaIndex + 1])) {
             return null; // nessuna area successiva: esame concluso
@@ -741,8 +788,11 @@ class ExamEngineService
         }
     }
 
-    private function ensureCurrentGroupIsValid(ExamSessionCandidateRun $run, ExamSession $session): ExamSessionCandidateRun
-    {
+    private function ensureCurrentGroupIsValid(
+        ExamSessionCandidateRun $run,
+        ExamSession $session
+    ): ExamSessionCandidateRun {
+
         if ($run->status !== 'in_progress' || !$run->current_exam_area_id || !$run->current_exam_level_id) {
             return $run;
         }
@@ -770,6 +820,7 @@ class ExamEngineService
         ExamSession $session,
         string $reason
     ): void {
+
         $result = $this->computeGroupResult(
             $session->id,
             $run->id_candidate,
@@ -824,6 +875,41 @@ class ExamEngineService
             $run->id_candidate,
             ['exam_area_id' => $next['area']->id, 'exam_level_id' => $next['level']->id]
         );
+    }
+
+    /**
+     * =========================================================
+     * SESSION LOGGING
+     * =========================================================
+     */
+    private function logEvent(
+        int $sessionId,
+        string $eventType,
+        string $actorType,
+        ?int $actorId = null,
+        ?array $payload = null
+    ): void {
+
+        try {
+
+            ExamSessionLog::create([
+                'id_exam_session' => $sessionId,
+                'event_type' => $eventType,
+                'actor_type' => $actorType,
+                'actor_id' => $actorId,
+                'payload' => $payload,
+            ]);
+
+        } catch (\Throwable $e) {
+
+            Log::error(
+                'Exam session log error',
+                [
+                    'message' => $e->getMessage(),
+                    'session_id' => $sessionId,
+                ]
+            );
+        }
     }
 }
 
