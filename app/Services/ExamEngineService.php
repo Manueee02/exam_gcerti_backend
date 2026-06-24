@@ -233,19 +233,12 @@ class ExamEngineService
             $sessionPublicId
         )->firstOrFail();
 
-        /**
-         * Sessione deve essere live
-         */
         if ($session->status !== 'live') {
-
             throw new \Exception(
                 'La sessione non è attiva'
             );
         }
 
-        /**
-         * Recupero run candidato
-         */
         $run = ExamSessionCandidateRun::where(
             'id_exam_session',
             $session->id
@@ -254,13 +247,16 @@ class ExamEngineService
             ->firstOrFail();
 
         /**
-         * Candidato deve essere autorizzato
+         * Candidato deve essere autorizzato, in corso, oppure già concluso
+         * (completato o per timeout): questi ultimi due restano stati
+         * legittimi da interrogare, ad es. dalla schermata di fine sessione.
          */
         if (!in_array($run->status, [
             'authorized',
-            'in_progress'
+            'in_progress',
+            'completed',
+            'timeout',
         ])) {
-
             throw new \Exception(
                 'Candidato non autorizzato'
             );
@@ -284,18 +280,21 @@ class ExamEngineService
             );
         }
 
+        /**
+         * Esame già concluso (completato o per timeout): nessun controllo
+         * temporale ha più senso qui — se richiamassimo
+         * ensureGlobalTimeNotExpired() su un run già 'completed' regolarmente,
+         * a tempo scaduto lo riscriverebbe in 'timeout' indebitamente.
+         */
+        if (in_array($run->status, ['completed', 'timeout'])) {
+            return $this->buildCompletedPayload($session, $run);
+        }
+
         $this->ensureGlobalTimeNotExpired($session, $run);
         $run = $this->ensureCurrentGroupIsValid($run, $session);
 
         if ($run->status === 'completed') {
-            return [
-                'session' => $session,
-                'run' => $run,
-                'exam_completed' => true,
-                'current_area' => null,
-                'current_level' => null,
-                'questions' => collect(),
-            ];
+            return $this->buildCompletedPayload($session, $run);
         }
 
         /**
@@ -312,7 +311,6 @@ class ExamEngineService
             ->orderBy('position')
             ->get();
 
-        // Non esporre MAI la risposta corretta al candidato
         $questions->each(function ($cq) {
             $cq->question->answers->each(function ($answer) {
                 $answer->makeHidden('is_correct');
@@ -338,6 +336,23 @@ class ExamEngineService
                 ? Carbon::parse($run->started_at)->addMinutes($exam->duration_minutes ?? 60)
                 : null,
             'questions' => $questions,
+        ];
+    }
+
+    /**
+     * Payload restituito quando il run è già concluso, sia per
+     * completamento naturale che per timeout globale. Centralizzato
+     * per evitare di duplicarlo nei due punti in cui serve.
+     */
+    private function buildCompletedPayload(ExamSession $session, ExamSessionCandidateRun $run): array
+    {
+        return [
+            'session' => $session,
+            'run' => $run,
+            'exam_completed' => true,
+            'current_area' => null,
+            'current_level' => null,
+            'questions' => collect(),
         ];
     }
 
