@@ -26,9 +26,9 @@ class ExamEngineService
      * START SESSION
      * =========================================================
      */
-    public function startSession(string $plannedExamPublicId): ExamSession
+    public function startSession(string $plannedExamPublicId, ?array $requestMeta = null): ExamSession
     {
-        return DB::transaction(function () use ($plannedExamPublicId) {
+        return DB::transaction(function () use ($plannedExamPublicId, $requestMeta) {
 
             /**
              * Recupero planned exam
@@ -37,6 +37,8 @@ class ExamEngineService
                 'public_id',
                 $plannedExamPublicId
             )->firstOrFail();
+
+            $exam = Exam::find($plannedExam->id_exam);
 
             /**
              * Controllo apertura sessione:
@@ -79,6 +81,14 @@ class ExamEngineService
             }
 
             /**
+             * Recupero candidati (serve anche per il conteggio nel log)
+             */
+            $candidates = PlannedExamCandidate::where(
+                'id_planned_exam',
+                $plannedExam->id
+            )->get();
+
+            /**
              * Creo sessione
              */
             $session = ExamSession::create([
@@ -93,18 +103,16 @@ class ExamEngineService
                 'SESSION_STARTED',
                 'system',
                 null,
-                [
+                $this->withMeta([
                     'planned_exam_id' => $plannedExam->id,
-                ]
+                    'exam_id' => $exam->id ?? null,
+                    'exam_name' => $exam->name ?? null,
+                    'exam_duration_minutes' => $exam->duration_minutes ?? null,
+                    'scheduled_date' => $datePart,
+                    'scheduled_time' => $timePart,
+                    'total_candidates' => $candidates->count(),
+                ], $requestMeta)
             );
-
-            /**
-             * Recupero candidati
-             */
-            $candidates = PlannedExamCandidate::where(
-                'id_planned_exam',
-                $plannedExam->id
-            )->get();
 
             foreach ($candidates as $candidate) {
 
@@ -134,6 +142,21 @@ class ExamEngineService
                     ]);
                 }
 
+                /**
+                 * Dettaglio per il log: quante domande per ciascun
+                 * gruppo area+livello sono state effettivamente estratte,
+                 * piu' l'elenco completo degli id (utile per audit/dispute,
+                 * mai esposto al candidato tramite l'API di log filtrata).
+                 */
+                $groupsBreakdown = $questions
+                    ->groupBy(fn ($q) => $q->exam_area_id . '-' . $q->exam_level_id)
+                    ->map(fn ($group) => [
+                        'exam_area_id' => $group->first()->exam_area_id,
+                        'exam_level_id' => $group->first()->exam_level_id,
+                        'count' => $group->count(),
+                    ])
+                    ->values();
+
                 $this->logEvent(
                     $session->id,
                     'QUESTIONS_ASSIGNED',
@@ -141,6 +164,8 @@ class ExamEngineService
                     $candidate->id_candidate,
                     [
                         'questions_count' => count($questions),
+                        'question_ids' => $questions->pluck('id')->values(),
+                        'groups' => $groupsBreakdown,
                     ]
                 );
 
@@ -167,7 +192,7 @@ class ExamEngineService
                     'LEVEL_STARTED',
                     'system',
                     $candidate->id_candidate,
-                    ['exam_area_id' => $firstGroup['area']->id, 'exam_level_id' => $firstGroup['level']->id]
+                    $this->buildLevelStartedPayload($firstGroup['area'], $firstGroup['level'])
                 );
             }
 
@@ -188,7 +213,8 @@ class ExamEngineService
     public function enableCandidate(
         string $sessionPublicId,
         int $candidateId,
-        int $examinerId
+        int $examinerId,
+        ?array $requestMeta = null
     ): void {
 
         $session = ExamSession::where(
@@ -212,9 +238,10 @@ class ExamEngineService
             'CANDIDATE_AUTHORIZED',
             'examiner',
             $examinerId,
-            [
+            $this->withMeta([
                 'candidate_id' => $candidateId,
-            ]
+                'authorized_at' => now()->toIso8601String(),
+            ], $requestMeta)
         );
     }
 
@@ -225,7 +252,8 @@ class ExamEngineService
      */
     public function getCandidateExam(
         string $sessionPublicId,
-        int $candidateId
+        int $candidateId,
+        ?array $requestMeta = null
     ): array {
 
         $session = ExamSession::where(
@@ -233,12 +261,19 @@ class ExamEngineService
             $sessionPublicId
         )->firstOrFail();
 
+        /**
+         * Sessione deve essere live
+         */
         if ($session->status !== 'live') {
+
             throw new \Exception(
                 'La sessione non è attiva'
             );
         }
 
+        /**
+         * Recupero run candidato
+         */
         $run = ExamSessionCandidateRun::where(
             'id_exam_session',
             $session->id
@@ -257,10 +292,13 @@ class ExamEngineService
             'completed',
             'timeout',
         ])) {
+
             throw new \Exception(
                 'Candidato non autorizzato'
             );
         }
+
+        $exam = Exam::find($session->id_exam);
 
         /**
          * Avvio esame
@@ -276,7 +314,14 @@ class ExamEngineService
                 $session->id,
                 'CANDIDATE_STARTED_EXAM',
                 'candidate',
-                $candidateId
+                $candidateId,
+                $this->withMeta([
+                    'started_at' => now()->toIso8601String(),
+                    'exam_duration_minutes' => $exam->duration_minutes ?? null,
+                    'exam_ends_at' => $exam && $exam->duration_minutes
+                        ? now()->copy()->addMinutes($exam->duration_minutes)->toIso8601String()
+                        : null,
+                ], $requestMeta)
             );
         }
 
@@ -311,7 +356,15 @@ class ExamEngineService
             ->orderBy('position')
             ->get();
 
-        $questions->each(function ($cq) {
+        // Non esporre MAI la risposta corretta al candidato, e mescola
+        // l'ordine delle risposte — stabile per (run, domanda): non cambia
+        // se il candidato fa refresh, ma e' diverso da candidato a candidato
+        // (cosi' non c'e' mai una posizione "sempre giusta" da intuire).
+        $questions->each(function ($cq) use ($run) {
+            $cq->question->answers = $cq->question->answers
+                ->sortBy(fn ($answer) => md5($run->id . '-' . $answer->id))
+                ->values();
+
             $cq->question->answers->each(function ($answer) {
                 $answer->makeHidden('is_correct');
             });
@@ -320,8 +373,6 @@ class ExamEngineService
         $rule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
             ->where('exam_level_id', $run->current_exam_level_id)
             ->first();
-
-        $exam = Exam::find($session->id_exam);
 
         return [
             'session' => $session,
@@ -340,23 +391,6 @@ class ExamEngineService
     }
 
     /**
-     * Payload restituito quando il run è già concluso, sia per
-     * completamento naturale che per timeout globale. Centralizzato
-     * per evitare di duplicarlo nei due punti in cui serve.
-     */
-    private function buildCompletedPayload(ExamSession $session, ExamSessionCandidateRun $run): array
-    {
-        return [
-            'session' => $session,
-            'run' => $run,
-            'exam_completed' => true,
-            'current_area' => null,
-            'current_level' => null,
-            'questions' => collect(),
-        ];
-    }
-
-    /**
      * =========================================================
      * SUBMIT ANSWER
      * =========================================================
@@ -366,7 +400,8 @@ class ExamEngineService
         int $candidateId,
         int $questionId,
         array $answer,
-        ?int $timeSpentSeconds = null
+        ?int $timeSpentSeconds = null,
+        ?array $requestMeta = null
     ): ExamSessionAnswer {
 
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
@@ -405,7 +440,7 @@ class ExamEngineService
                 'UNAUTHORIZED_QUESTION_ACCESS',
                 'candidate',
                 $candidateId,
-                ['question_id' => $questionId, 'reason' => 'fuori dal livello corrente']
+                $this->withMeta(['question_id' => $questionId, 'reason' => 'fuori dal livello corrente'], $requestMeta)
             );
             throw new \Exception('Domanda non appartenente al livello corrente');
         }
@@ -420,7 +455,7 @@ class ExamEngineService
                 'UNAUTHORIZED_QUESTION_ACCESS',
                 'candidate',
                 $candidateId,
-                ['question_id' => $questionId]
+                $this->withMeta(['question_id' => $questionId], $requestMeta)
             );
             throw new \Exception('Domanda non assegnata');
         }
@@ -436,7 +471,7 @@ class ExamEngineService
                 'DUPLICATE_ANSWER_ATTEMPT',
                 'candidate',
                 $candidateId,
-                ['question_id' => $questionId]
+                $this->withMeta(['question_id' => $questionId], $requestMeta)
             );
             throw new \Exception('Domanda già risposta');
         }
@@ -454,7 +489,7 @@ class ExamEngineService
         // Solo la scrittura finale resta in transazione: serve a coprire
         // la race condition sul vincolo unique (Fix 4), non i controlli sopra.
         $savedAnswer = DB::transaction(function () use (
-            $session, $candidateId, $questionId, $answer, $isCorrect, $timeSpentSeconds, $run
+            $session, $candidateId, $questionId, $answer, $isCorrect, $timeSpentSeconds, $run, $requestMeta
         ) {
             try {
                 $saved = ExamSessionAnswer::create([
@@ -480,12 +515,20 @@ class ExamEngineService
                 throw $e;
             }
 
+            // Log dettagliato server-side (include is_correct: e' materiale
+            // di audit per esaminatori, MAI esposto al candidato tramite
+            // l'API di log filtrata — vedi getActivityLog()).
             $this->logEvent(
                 $session->id,
                 'ANSWER_SUBMITTED',
                 'candidate',
                 $candidateId,
-                ['question_id' => $questionId, 'is_correct' => $isCorrect]
+                $this->withMeta([
+                    'question_id' => $questionId,
+                    'is_correct' => $isCorrect,
+                    'time_spent_seconds' => $timeSpentSeconds,
+                    'id_exam_session_step' => $run->current_step,
+                ], $requestMeta)
             );
 
             return $saved;
@@ -495,6 +538,8 @@ class ExamEngineService
          * Se il candidato ha risposto a tutte le domande previste
          * dalla regola del gruppo corrente, chiudo il gruppo e avanzo.
          */
+        $levelResult = null;
+
         $rule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
             ->where('exam_level_id', $run->current_exam_level_id)
             ->first();
@@ -510,13 +555,93 @@ class ExamEngineService
                 ->count();
 
             if ($answeredInGroup >= $rule->n_questions) {
-                $this->finalizeCurrentGroupAndAdvance($run, $session, 'completed');
+                $levelResult = $this->finalizeCurrentGroupAndAdvance($run, $session, 'completed');
             }
         }
 
         $savedAnswer->makeHidden('is_correct');
 
+        // Esposizione SOLO dell'esito aggregato di livello (punteggio + pass/fail),
+        // mai della correttezza della singola domanda. Presente solo quando questa
+        // risposta era l'ultima del gruppo.
+        if ($levelResult !== null) {
+            $savedAnswer->level_result = [
+                'correct' => $levelResult['correct'],
+                'total' => $levelResult['total'],
+                'passed' => $levelResult['passed'],
+            ];
+        }
+
         return $savedAnswer;
+    }
+
+    /**
+     * =========================================================
+     * GET ACTIVITY LOG
+     * =========================================================
+     *
+     * Restituisce la cronologia eventi di un candidato in una sessione.
+     * $includeSensitiveDetails controlla se rimuovere il campo
+     * 'is_correct' (presente su ANSWER_SUBMITTED): false per il candidato
+     * stesso, true per admin/esaminatore. Gli esiti AGGREGATI di livello
+     * (correct/total/passed su LEVEL_FINISHED) non vengono mai filtrati,
+     * perché sono l'informazione che abbiamo deciso di esporre comunque.
+     */
+    public function getActivityLog(
+        string $sessionPublicId,
+        int $candidateId,
+        bool $includeSensitiveDetails = false
+    ): array {
+
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->firstOrFail();
+
+        $events = ExamSessionLog::where('id_exam_session', $session->id)
+            ->where(function ($q) use ($candidateId) {
+                // Eventi specifici del candidato + eventi a livello di
+                // intera sessione (actor_id null, es. SESSION_STARTED/ENDED).
+                $q->where('actor_id', $candidateId)
+                    ->orWhereNull('actor_id');
+            })
+            ->orderBy('id')
+            ->get()
+            ->map(function ($log) use ($includeSensitiveDetails) {
+                $payload = $log->payload;
+
+                if (!$includeSensitiveDetails && is_array($payload) && array_key_exists('is_correct', $payload)) {
+                    unset($payload['is_correct']);
+                }
+
+                return [
+                    'event_type' => $log->event_type,
+                    'actor_type' => $log->actor_type,
+                    'actor_id' => $log->actor_id,
+                    'payload' => $payload,
+                    'created_at' => $log->created_at,
+                ];
+            })
+            ->values();
+
+        return [
+            'session' => [
+                'public_id' => $session->public_id,
+                'status' => $session->status,
+                'started_at' => $session->started_at,
+                'ended_at' => $session->ended_at,
+            ],
+            'run' => [
+                'status' => $run->status,
+                'started_at' => $run->started_at,
+                'ended_at' => $run->ended_at,
+                'current_step' => $run->current_step,
+                'current_exam_area_id' => $run->current_exam_area_id,
+                'current_exam_level_id' => $run->current_exam_level_id,
+            ],
+            'events' => $events,
+        ];
     }
 
     /**
@@ -526,7 +651,8 @@ class ExamEngineService
      */
     public function calculateScore(
         string $sessionPublicId,
-        int $candidateId
+        int $candidateId,
+        ?array $requestMeta = null
     ): array {
 
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
@@ -567,7 +693,7 @@ class ExamEngineService
             'REPORT_GENERATED',
             'system',
             $candidateId,
-            ['report' => $report]
+            $this->withMeta(['report' => $report], $requestMeta)
         );
 
         return ['areas' => $report];
@@ -579,11 +705,12 @@ class ExamEngineService
      * =========================================================
      */
     public function endSession(
-        string $sessionPublicId
+        string $sessionPublicId,
+        ?array $requestMeta = null
     ): ExamSession {
 
         return DB::transaction(function () use (
-            $sessionPublicId
+            $sessionPublicId, $requestMeta
         ) {
 
             $session = ExamSession::where(
@@ -615,11 +742,22 @@ class ExamEngineService
                 'ended_at' => now(),
             ]);
 
+            // Statistiche aggregate calcolate DOPO l'update sopra, cosi'
+            // riflettono lo stato finale di tutti i run di questa sessione.
+            $statusCounts = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+                ->selectRaw('status, count(*) as total')
+                ->groupBy('status')
+                ->pluck('total', 'status');
+
             $this->logEvent(
                 $session->id,
                 'SESSION_ENDED',
                 'system',
-                null
+                null,
+                $this->withMeta([
+                    'candidates_by_status' => $statusCounts,
+                    'total_candidates' => $statusCounts->sum(),
+                ], $requestMeta)
             );
 
             return $session;
@@ -794,11 +932,19 @@ class ExamEngineService
 
         $exam = Exam::find($session->id_exam);
         $durationMinutes = $exam->duration_minutes ?? 60;
-        $endTime = Carbon::parse($run->started_at)->addMinutes($durationMinutes);
+        $startedAt = Carbon::parse($run->started_at);
+        $endTime = $startedAt->copy()->addMinutes($durationMinutes);
 
         if (now()->gt($endTime)) {
             $run->update(['status' => 'timeout', 'ended_at' => now()]);
-            $this->logEvent($session->id, 'EXAM_TIMEOUT', 'system', $run->id_candidate);
+            $this->logEvent($session->id, 'EXAM_TIMEOUT', 'system', $run->id_candidate, [
+                'exam_area_id' => $run->current_exam_area_id,
+                'exam_level_id' => $run->current_exam_level_id,
+                'exam_duration_minutes' => $durationMinutes,
+                'started_at' => $startedAt->toIso8601String(),
+                'timed_out_at' => now()->toIso8601String(),
+                'elapsed_seconds' => $startedAt->diffInSeconds(now()),
+            ]);
             throw new \Exception('Tempo esame terminato');
         }
     }
@@ -830,11 +976,35 @@ class ExamEngineService
         return $run;
     }
 
+    /**
+     * Costruisce il payload di log per LEVEL_STARTED, con tutto il
+     * contesto utile (nomi, durata, soglie) e non solo gli id grezzi.
+     * Usato sia all'avvio sessione che durante l'avanzamento.
+     */
+    private function buildLevelStartedPayload(ExamArea $area, ExamLevel $level): array
+    {
+        $rule = ExamExtractionRule::where('exam_area_id', $area->id)
+            ->where('exam_level_id', $level->id)
+            ->first();
+
+        return [
+            'exam_area_id' => $area->id,
+            'exam_level_id' => $level->id,
+            'area_name' => $area->name,
+            'area_label' => $area->label,
+            'level_name' => $level->name,
+            'level_label' => $level->label,
+            'level_duration_minutes' => $rule->duration_minutes ?? null,
+            'n_questions_required' => $rule->n_questions ?? null,
+            'passing_score_required' => $rule->passing_score ?? null,
+        ];
+    }
+
     private function finalizeCurrentGroupAndAdvance(
         ExamSessionCandidateRun $run,
         ExamSession $session,
         string $reason
-    ): void {
+    ): array {
 
         $result = $this->computeGroupResult(
             $session->id,
@@ -842,6 +1012,16 @@ class ExamEngineService
             $run->current_exam_area_id,
             $run->current_exam_level_id
         );
+
+        $finishedArea = ExamArea::find($run->current_exam_area_id);
+        $finishedLevel = ExamLevel::find($run->current_exam_level_id);
+        $finishedRule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
+            ->where('exam_level_id', $run->current_exam_level_id)
+            ->first();
+
+        $durationUsedSeconds = $run->current_step_started_at
+            ? Carbon::parse($run->current_step_started_at)->diffInSeconds(now())
+            : null;
 
         $this->logEvent(
             $session->id,
@@ -851,10 +1031,15 @@ class ExamEngineService
             [
                 'exam_area_id' => $run->current_exam_area_id,
                 'exam_level_id' => $run->current_exam_level_id,
+                'area_name' => $finishedArea->name ?? null,
+                'level_name' => $finishedLevel->name ?? null,
                 'reason' => $reason,
                 'correct' => $result['correct'],
                 'total' => $result['total'],
                 'passed' => $result['passed'],
+                'passing_score_required' => $finishedRule->passing_score ?? null,
+                'level_duration_minutes' => $finishedRule->duration_minutes ?? null,
+                'duration_used_seconds' => $durationUsedSeconds,
             ]
         );
 
@@ -872,8 +1057,18 @@ class ExamEngineService
                 'current_exam_area_id' => null,
                 'current_exam_level_id' => null,
             ]);
-            $this->logEvent($session->id, 'EXAM_COMPLETED', 'system', $run->id_candidate);
-            return;
+
+            $totalDurationSeconds = $run->started_at
+                ? Carbon::parse($run->started_at)->diffInSeconds(now())
+                : null;
+
+            $this->logEvent($session->id, 'EXAM_COMPLETED', 'system', $run->id_candidate, [
+                'started_at' => $run->started_at ? Carbon::parse($run->started_at)->toIso8601String() : null,
+                'ended_at' => now()->toIso8601String(),
+                'total_duration_seconds' => $totalDurationSeconds,
+            ]);
+
+            return $result;
         }
 
         $run->update([
@@ -888,8 +1083,10 @@ class ExamEngineService
             'LEVEL_STARTED',
             'system',
             $run->id_candidate,
-            ['exam_area_id' => $next['area']->id, 'exam_level_id' => $next['level']->id]
+            $this->buildLevelStartedPayload($next['area'], $next['level'])
         );
+
+        return $result;
     }
 
     /**
@@ -926,5 +1123,36 @@ class ExamEngineService
             );
         }
     }
-}
 
+    /**
+     * Aggiunge metadati di richiesta (IP, user agent, ...) a un payload
+     * di log, solo se forniti dal controller. Tenuto separato dal resto
+     * della logica cosi' i metodi del service restano chiamabili senza
+     * contesto HTTP (come fanno tutti i test PHPUnit esistenti).
+     */
+    private function withMeta(array $payload, ?array $requestMeta): array
+    {
+        if ($requestMeta) {
+            $payload['request_meta'] = $requestMeta;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Payload restituito quando il run è già concluso, sia per
+     * completamento naturale che per timeout globale. Centralizzato
+     * per evitare di duplicarlo nei due punti in cui serve.
+     */
+    private function buildCompletedPayload(ExamSession $session, ExamSessionCandidateRun $run): array
+    {
+        return [
+            'session' => $session,
+            'run' => $run,
+            'exam_completed' => true,
+            'current_area' => null,
+            'current_level' => null,
+            'questions' => collect(),
+        ];
+    }
+}

@@ -1,7 +1,7 @@
 <?php
 
 
-use App\Http\Controllers\Api\ExamSessionController;
+use App\Http\Controllers\ExamSessionController;
 use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\EmailVerificationController;
 use App\Http\Controllers\ExamController;
@@ -257,6 +257,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::post('/start/{plannedExamPublicId}', [ExamSessionController::class, 'start']);
             Route::post('/end/{sessionPublicId}', [ExamSessionController::class, 'end']);
             Route::post('/{sessionPublicId}/enable-candidate', [ExamSessionController::class, 'enableCandidate']);
+            Route::get('/{sessionPublicId}/candidates/{candidatePublicId}/activity-log', [ExamSessionController::class, 'candidateActivityLog']);
         });
     Route::middleware('role:user')
         ->prefix('exam-sessions')

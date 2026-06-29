@@ -1,19 +1,38 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use App\Http\Requests\SubmitAnswerRequest;
+use App\Models\Answer;
+use App\Models\Candidate;
 use App\Models\ExamSession;
 use App\Models\PlannedExam;
+use App\Models\Question;
 use App\Services\ExamEngineService;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 
 class ExamSessionController extends Controller
 {
+
+    use AuthorizesRequests;
+
     public function __construct(
         protected ExamEngineService $engine
     ) {}
+
+    /**
+     * Metadati di richiesta (IP, user agent) da agganciare ai log
+     * del service. Centralizzato qui cosi' ogni metodo lo costruisce
+     * allo stesso modo, senza ripetere la logica di estrazione.
+     */
+    private function requestMeta(Request $request): array
+    {
+        return [
+            'ip' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ];
+    }
 
     /**
      * =====================================================
@@ -36,7 +55,8 @@ class ExamSessionController extends Controller
         );
 
         $session = $this->engine->startSession(
-            $plannedExamPublicId
+            $plannedExamPublicId,
+            $this->requestMeta($request)
         );
 
         return response()->json([
@@ -66,7 +86,8 @@ class ExamSessionController extends Controller
         );
 
         $session = $this->engine->endSession(
-            $sessionPublicId
+            $sessionPublicId,
+            $this->requestMeta($request)
         );
 
         return response()->json([
@@ -88,7 +109,7 @@ class ExamSessionController extends Controller
         $request->validate([
             'candidate_id' => [
                 'required',
-                'integer',
+                'uuid',
             ],
         ]);
 
@@ -102,10 +123,16 @@ class ExamSessionController extends Controller
             $session
         );
 
+        $candidate = Candidate::where(
+            'public_id',
+            $request->candidate_id
+        )->firstOrFail();
+
         $this->engine->enableCandidate(
             $sessionPublicId,
-            $request->candidate_id,
-            $request->user()->id
+            $candidate->id,
+            $request->user()->id,
+            $this->requestMeta($request)
         );
 
         return response()->json([
@@ -135,7 +162,8 @@ class ExamSessionController extends Controller
 
         $data = $this->engine->getCandidateExam(
             $sessionPublicId,
-            $request->user()->candidate->id
+            $request->user()->candidate->id,
+            $this->requestMeta($request)
         );
 
         return response()->json([
@@ -164,12 +192,25 @@ class ExamSessionController extends Controller
             $session
         );
 
+        $question = Question::where(
+            'public_id',
+            $request->question_id
+        )->firstOrFail();
+
+        $selectedAnswer = Answer::where(
+            'public_id',
+            $request->answer['answer_id']
+        )
+            ->where('id_question', $question->id)
+            ->firstOrFail();
+
         $answer = $this->engine->submitAnswer(
             $sessionPublicId,
             $request->user()->candidate->id,
-            $request->question_id,
-            $request->answer,
-            $request->time_spent_seconds
+            $question->id,
+            ['answer_id' => $selectedAnswer->id],
+            $request->time_spent_seconds,
+            $this->requestMeta($request)
         );
 
         return response()->json([
@@ -200,12 +241,85 @@ class ExamSessionController extends Controller
 
         $score = $this->engine->calculateScore(
             $sessionPublicId,
-            $request->user()->candidate->id
+            $request->user()->candidate->id,
+            $this->requestMeta($request)
         );
 
         return response()->json([
             'success' => true,
             'data' => $score,
+        ]);
+    }
+
+    /**
+     * =====================================================
+     * MY ACTIVITY LOG (candidato — vista filtrata, senza is_correct)
+     * =====================================================
+     */
+    public function myActivityLog(
+        Request $request,
+        string $sessionPublicId
+    ) {
+
+        $session = ExamSession::where(
+            'public_id',
+            $sessionPublicId
+        )->firstOrFail();
+
+        // Stessa regola di accesso usata per getCandidateExam: deve
+        // essere lui stesso il candidato di questa sessione.
+        $this->authorize(
+            'accessCandidateExam',
+            $session
+        );
+
+        $data = $this->engine->getActivityLog(
+            $sessionPublicId,
+            $request->user()->candidate->id,
+            includeSensitiveDetails: false
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * =====================================================
+     * CANDIDATE ACTIVITY LOG (admin/esaminatore — vista completa)
+     * =====================================================
+     */
+    public function candidateActivityLog(
+        Request $request,
+        string $sessionPublicId,
+        string $candidatePublicId
+    ) {
+
+        $session = ExamSession::where(
+            'public_id',
+            $sessionPublicId
+        )->firstOrFail();
+
+        $this->authorize(
+            'viewCandidateLog',
+            $session
+        );
+
+        $candidate = Candidate::where(
+            'public_id',
+            $candidatePublicId
+        )->firstOrFail();
+
+        $data = $this->engine->getActivityLog(
+            $sessionPublicId,
+            $candidate->id,
+            includeSensitiveDetails: true
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
         ]);
     }
 }

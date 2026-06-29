@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Models\Candidate;
 use App\Models\Exam;
 use App\Models\ExamSession;
+use App\Models\PlannedExam;
 use App\Models\PlannedExamInscription;
 use App\Models\Question;
 use App\Policies\CandidatePolicy;
@@ -25,6 +26,7 @@ class AuthServiceProvider extends ServiceProvider
         Question::class => QuestionPolicy::class,
         Exam::class => ExamPolicy::class,
         ExamSession::class => ExamSessionPolicy::class,
+        PlannedExam::class => ExamSessionPolicy::class,
     ];
 
     /**

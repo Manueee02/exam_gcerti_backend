@@ -16,7 +16,7 @@ class SubmitAnswerRequest extends FormRequest
         return [
             'question_id' => [
                 'required',
-                'integer',
+                'uuid',
             ],
 
             'answer' => [
@@ -26,7 +26,7 @@ class SubmitAnswerRequest extends FormRequest
 
             'answer.answer_id' => [
                 'required',
-                'integer',
+                'uuid',
             ],
 
             'time_spent_seconds' => [
