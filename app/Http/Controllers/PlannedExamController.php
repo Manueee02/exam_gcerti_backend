@@ -598,8 +598,16 @@ class PlannedExamController extends Controller
 
 
     // GET /api/planned-exams/reference-data
+// GET /api/planned-exams/reference-data
     public function referenceData()
     {
+        $requestId = uniqid('refdata_', true);
+
+        Log::info('[PlannedExamController@referenceData] START', [
+            'request_id' => $requestId,
+            'app1_url'   => config('services.app1.url'),
+        ]);
+
         try {
             $exams = Exam::all()
                 ->map(fn($e) => [
@@ -614,55 +622,137 @@ class PlannedExamController extends Controller
                     'updated_at'  => $e->updated_at,
                 ])
                 ->values();
+
+            Log::info('[PlannedExamController@referenceData] Exams OK', [
+                'request_id' => $requestId,
+                'count'      => $exams->count(),
+            ]);
         } catch (\Exception $e) {
             Log::error('[PlannedExamController@referenceData] Errore nel recupero degli esami', [
+                'request_id' => $requestId,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
             return response()->json(['message' => 'Errore nel recupero degli esami'], 500);
         }
 
+        // =========================
+        // EXAMINERS
+        // =========================
         try {
+            Log::info('[PlannedExamController@referenceData] Chiamata getExaminers (examiner) - INIZIO', [
+                'request_id' => $requestId,
+                'filters'    => ['type' => 'examiner', 'status' => 'qualificato'],
+            ]);
+
             $examinersResponse = $this->examinerService->getExaminers([
                 'type'   => 'examiner',
                 'status' => 'qualificato',
             ]);
 
-            $examiners = collect($examinersResponse['data']['data'] ?? [])
+            // Log della risposta GREZZA, prima di qualunque trasformazione
+            Log::info('[PlannedExamController@referenceData] Chiamata getExaminers (examiner) - RISPOSTA GREZZA', [
+                'request_id' => $requestId,
+                'status'     => $examinersResponse['status'] ?? null,
+                'error'      => $examinersResponse['error'] ?? null,
+                'data_type'  => gettype($examinersResponse['data'] ?? null),
+                'data_keys'  => is_array($examinersResponse['data'] ?? null) ? array_keys($examinersResponse['data']) : null,
+                'full_response' => $examinersResponse, // l'intero payload, per non perdere nulla
+            ]);
+
+            $rawExaminers = $examinersResponse['data']['data'] ?? [];
+
+            Log::info('[PlannedExamController@referenceData] Examiners - prima del map', [
+                'request_id'     => $requestId,
+                'raw_count'      => is_countable($rawExaminers) ? count($rawExaminers) : 'NOT_COUNTABLE',
+                'raw_first_item' => is_array($rawExaminers) ? ($rawExaminers[0] ?? null) : null,
+            ]);
+
+            $examiners = collect($rawExaminers)
                 ->map(fn($e) => [
                     'public_id' => $e['public_id'] ?? null,
                     'name'      => $e['name'],
                     'surname'   => $e['surname'],
                 ])
                 ->values();
+
+            Log::info('[PlannedExamController@referenceData] Examiners - dopo il map, OK', [
+                'request_id' => $requestId,
+                'count'      => $examiners->count(),
+            ]);
         } catch (\Exception $e) {
             Log::error('[PlannedExamController@referenceData] Errore nel recupero degli esaminatori', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'request_id' => $requestId,
+                'error'      => $e->getMessage(),
+                'class'      => get_class($e),
+                'file'       => $e->getFile(),
+                'line'       => $e->getLine(),
+                'trace'      => $e->getTraceAsString(),
             ]);
             return response()->json(['message' => 'Errore nel recupero degli esaminatori'], 500);
         }
 
+        // =========================
+        // DECISION MAKERS
+        // =========================
         try {
+            Log::info('[PlannedExamController@referenceData] Chiamata getExaminers (decision_maker) - INIZIO', [
+                'request_id' => $requestId,
+                'filters'    => ['type' => 'decision_maker', 'status' => 'qualificato'],
+            ]);
+
             $decisionMakersResponse = $this->examinerService->getExaminers([
                 'type'   => 'decision_maker',
                 'status' => 'qualificato',
             ]);
 
-            $decisionMakers = collect($decisionMakersResponse['data']['data'] ?? [])
+            Log::info('[PlannedExamController@referenceData] Chiamata getExaminers (decision_maker) - RISPOSTA GREZZA', [
+                'request_id'    => $requestId,
+                'status'        => $decisionMakersResponse['status'] ?? null,
+                'error'         => $decisionMakersResponse['error'] ?? null,
+                'data_type'     => gettype($decisionMakersResponse['data'] ?? null),
+                'data_keys'     => is_array($decisionMakersResponse['data'] ?? null) ? array_keys($decisionMakersResponse['data']) : null,
+                'full_response' => $decisionMakersResponse,
+            ]);
+
+            $rawDecisionMakers = $decisionMakersResponse['data']['data'] ?? [];
+
+            Log::info('[PlannedExamController@referenceData] DecisionMakers - prima del map', [
+                'request_id'     => $requestId,
+                'raw_count'      => is_countable($rawDecisionMakers) ? count($rawDecisionMakers) : 'NOT_COUNTABLE',
+                'raw_first_item' => is_array($rawDecisionMakers) ? ($rawDecisionMakers[0] ?? null) : null,
+            ]);
+
+            $decisionMakers = collect($rawDecisionMakers)
                 ->map(fn($e) => [
                     'public_id' => $e['public_id'] ?? null,
                     'name'      => $e['name'],
                     'surname'   => $e['surname'],
                 ])
                 ->values();
+
+            Log::info('[PlannedExamController@referenceData] DecisionMakers - dopo il map, OK', [
+                'request_id' => $requestId,
+                'count'      => $decisionMakers->count(),
+            ]);
         } catch (\Exception $e) {
             Log::error('[PlannedExamController@referenceData] Errore nel recupero dei decision makers', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'request_id' => $requestId,
+                'error'      => $e->getMessage(),
+                'class'      => get_class($e),
+                'file'       => $e->getFile(),
+                'line'       => $e->getLine(),
+                'trace'      => $e->getTraceAsString(),
             ]);
             return response()->json(['message' => 'Errore nel recupero dei decision makers'], 500);
         }
+
+        Log::info('[PlannedExamController@referenceData] END - successo', [
+            'request_id'           => $requestId,
+            'exams_count'          => $exams->count(),
+            'examiners_count'      => $examiners->count(),
+            'decision_makers_count' => $decisionMakers->count(),
+        ]);
 
         return response()->json([
             'exams'           => $exams,

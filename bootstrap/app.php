@@ -34,6 +34,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'log.activity' => \App\Http\Middleware\LogUserActivity::class,
             'check.active.token' => \App\Http\Middleware\CheckActiveToken::class,
             'role' => \App\Http\Middleware\CheckRole::class,
+            'internal.sync.auth' => \App\Http\Middleware\InternalSyncAuth::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

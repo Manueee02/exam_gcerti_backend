@@ -9,12 +9,15 @@ use Throwable;
 
 class ExaminerService
 {
-    public function getExaminer($publicId)
+    private const TIMEOUT_SECONDS = 30;
+
+    public function getExaminer(string $publicId): array
     {
         $url = config('services.app1.url') . '/examiner/' . $publicId;
 
         try {
             $response = Http::withToken(config('services.app1.token'))
+                ->timeout(self::TIMEOUT_SECONDS)
                 ->get($url);
 
             if (!$response->successful()) {
@@ -24,11 +27,19 @@ class ExaminerService
                     'status' => $response->status(),
                     'response_body' => $response->json() ?? $response->body(),
                 ]);
+
+                return [
+                    'status' => $response->status(),
+                    'data' => null,
+                    'error' => 'App1 ha risposto con errore',
+                    'app1_response' => $response->json() ?? $response->body(),
+                ];
             }
 
             return [
-                'status' => $response->getStatusCode(),
-                'data' => $response->json()
+                'status' => $response->status(),
+                'data' => $response->json(),
+                'error' => null,
             ];
         } catch (ConnectionException $e) {
             Log::error('ExaminerService::getExaminer - Connessione ad App1 fallita', [
@@ -60,6 +71,8 @@ class ExaminerService
 
     public function getExaminers(array $filters = []): array
     {
+        Log::info('URL chiamata App1', ['url' => config('services.app1.url')]);
+
         $query = [];
 
         if (isset($filters['type'])) {
@@ -74,6 +87,7 @@ class ExaminerService
 
         try {
             $response = Http::withToken(config('services.app1.token'))
+                ->timeout(self::TIMEOUT_SECONDS)
                 ->get($url, $query);
 
             if (!$response->successful()) {
@@ -86,13 +100,16 @@ class ExaminerService
 
                 return [
                     'status' => $response->status(),
-                    'error' => 'Errore contattando App 1'
+                    'data' => null,
+                    'error' => 'App1 ha risposto con errore',
+                    'app1_response' => $response->json() ?? $response->body(),
                 ];
             }
 
             return [
                 'status' => $response->status(),
-                'data' => $response->json()
+                'data' => $response->json(),
+                'error' => null,
             ];
         } catch (ConnectionException $e) {
             Log::error('ExaminerService::getExaminers - Connessione ad App1 fallita', [
@@ -103,6 +120,7 @@ class ExaminerService
 
             return [
                 'status' => 503,
+                'data' => null,
                 'error' => 'Connessione ad App 1 fallita: ' . $e->getMessage(),
             ];
         } catch (Throwable $e) {
@@ -115,6 +133,7 @@ class ExaminerService
 
             return [
                 'status' => 500,
+                'data' => null,
                 'error' => 'Errore interno: ' . $e->getMessage(),
             ];
         }

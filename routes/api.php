@@ -1,6 +1,7 @@
 <?php
 
 
+use App\Http\Controllers\AuditorSyncController;
 use App\Http\Controllers\ExamSessionController;
 use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\EmailVerificationController;
@@ -33,6 +34,12 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
+});
+
+// routes/api.php (App2) — protette da middleware dedicato
+Route::middleware('internal.sync.auth', 'log.activity')->prefix('internal/sync')->group(function () {
+    Route::post('/auditor', [AuditorSyncController::class, 'upsert']);
+    Route::delete('/auditor/{id}', [AuditorSyncController::class, 'delete']);
 });
 
 Route::middleware('log.activity')->group(function () {

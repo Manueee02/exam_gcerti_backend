@@ -35,9 +35,15 @@ return [
         ],
     ],
 
-    'app1' => [
+    /*'app1' => [
         'url' => env('APP1_API_URL'),
         'token' => env('APP1_SERVER_TOKEN'),
+    ],*/
+
+    'internal_sync' => [
+        'token' => env('INTERNAL_SYNC_TOKEN'),
+        'allowed_ips' => env('INTERNAL_SYNC_ALLOWED_IPS', ''),
     ],
+
 
 ];
