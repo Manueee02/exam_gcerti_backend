@@ -28,6 +28,7 @@ return new class extends Migration
             $table->date('end_workship')->nullable();
             $table->timestamp('app1_updated_at')->nullable(); // updated_at originale di App1
             $table->timestamp('synced_at')->nullable();
+            $table->boolean('is_active')->default(true);
             $table->timestamps();
 
             $table->index(['is_examiner', 'has_qualified_status']);

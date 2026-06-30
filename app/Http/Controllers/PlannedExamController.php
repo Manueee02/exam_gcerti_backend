@@ -2,22 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AuditorCache;
 use App\Models\Exam;
 use App\Models\PlannedExam;
-use App\Services\ExaminerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
 class PlannedExamController extends Controller
 {
-    protected ExaminerService $examinerService;
-
-    public function __construct(ExaminerService $examinerService)
-    {
-        $this->examinerService = $examinerService;
-    }
-
     private function cleanDateTime(string $value, string $type = 'date'): string
     {
         if (empty($value)) return '';
@@ -71,37 +64,9 @@ class PlannedExamController extends Controller
         $examinerIds      = $plannedExams->pluck('id_examiner')->filter()->unique();
         $decisionMakerIds = $plannedExams->pluck('id_decision_maker')->filter()->unique();
 
-        // Fetch individuale per ogni esaminatore unico (evita problemi di paginazione)
-        $examiners = collect();
-        foreach ($examinerIds as $exId) {
-            try {
-                $resp = $this->examinerService->getExaminer($exId);
-                if (!empty($resp['data']['data']['auditor'])) {
-                    $examiners->put($exId, $resp['data']['data']['auditor']);
-                }
-            } catch (\Exception $e) {
-                Log::warning('[PlannedExamController@index] Impossibile recuperare esaminatore', [
-                    'id_examiner' => $exId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        // Fetch individuale per ogni decision maker unico
-        $decisionMakers = collect();
-        foreach ($decisionMakerIds as $dmId) {
-            try {
-                $resp = $this->examinerService->getExaminer($dmId);
-                if (!empty($resp['data']['data']['auditor'])) {
-                    $decisionMakers->put($dmId, $resp['data']['data']['auditor']);
-                }
-            } catch (\Exception $e) {
-                Log::warning('[PlannedExamController@index] Impossibile recuperare decision maker', [
-                    'id_decision_maker' => $dmId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
+        // Lookup in blocco sulla cache locale (niente più chiamate HTTP)
+        $examiners = AuditorCache::whereIn('id', $examinerIds)->get()->keyBy('id');
+        $decisionMakers = AuditorCache::whereIn('id', $decisionMakerIds)->get()->keyBy('id');
 
         $result = $plannedExams->map(function ($plannedExam) use ($examiners, $decisionMakers, $userCandidateId) {
             $exam          = $plannedExam->exam;
@@ -121,18 +86,18 @@ class PlannedExamController extends Controller
                 'description' => $exam?->description,
                 'organizer'   => $examiner
                     ? [
-                        'name'      => $examiner['name'] . ' ' . $examiner['surname'],
-                        'public_id' => $examiner['public_id'] ?? null,
+                        'name'      => $examiner->name . ' ' . $examiner->surname,
+                        'public_id' => $examiner->public_id,
                     ]
                     : null,
                 'exam' => [
                     'public_id' => $exam?->public_id ?? null,
                 ],
                 'examiner' => $examiner
-                    ? ['public_id' => $examiner['public_id'] ?? null]
+                    ? ['public_id' => $examiner->public_id]
                     : null,
                 'decision_maker' => $decisionMaker
-                    ? ['public_id' => $decisionMaker['public_id'] ?? null]
+                    ? ['public_id' => $decisionMaker->public_id]
                     : null,
                 'already_enrolled' => $userCandidateId !== null
                     ? $plannedExam->inscriptions->isNotEmpty()
@@ -187,13 +152,9 @@ class PlannedExamController extends Controller
             $examiner = \App\Models\Examiner::where('id_user', $user->id)->first();
             if ($examiner) {
                 $isExaminerOrDM = true;
-                try {
-                    $examinerData = $this->examinerService->getExaminer($examiner->public_id);
-                    $externalId   = $examinerData['data']['data']['auditor']['id'] ?? null;
-                    $isAuthorizedForThisExam = $externalId && ($plannedExam->id_examiner == $externalId);
-                } catch (\Exception $e) {
-                    $isAuthorizedForThisExam = false;
-                }
+                $cached = AuditorCache::where('public_id', $examiner->public_id)->first();
+                $isAuthorizedForThisExam = $cached && ($plannedExam->id_examiner == $cached->id);
+
                 Log::info('[PlannedExamController@show] Examiner verifica autorizzazione', [
                     'user_id' => $user->id,
                     'examiner_public_id' => $examiner->public_id,
@@ -205,13 +166,9 @@ class PlannedExamController extends Controller
             $decisionMaker = \App\Models\DecisionsMaker::where('id_user', $user->id)->first();
             if ($decisionMaker) {
                 $isExaminerOrDM = true;
-                try {
-                    $dmData     = $this->examinerService->getExaminer($decisionMaker->public_id);
-                    $externalId = $dmData['data']['data']['auditor']['id'] ?? null;
-                    $isAuthorizedForThisExam = $externalId && ($plannedExam->id_decision_maker == $externalId);
-                } catch (\Exception $e) {
-                    $isAuthorizedForThisExam = false;
-                }
+                $cached = AuditorCache::where('public_id', $decisionMaker->public_id)->first();
+                $isAuthorizedForThisExam = $cached && ($plannedExam->id_decision_maker == $cached->id);
+
                 Log::info('[PlannedExamController@show] Decision maker verifica autorizzazione', [
                     'user_id' => $user->id,
                     'dm_public_id' => $decisionMaker->public_id,
@@ -222,59 +179,30 @@ class PlannedExamController extends Controller
         }
 
         // =========================
-        // ESAMINATORE
+        // ESAMINATORE / DECISION MAKER (lookup locale)
         // =========================
-        try {
-            $examinerResponse = $plannedExam->id_examiner
-                ? $this->examinerService->getExaminer($plannedExam->id_examiner)
-                : null;
-        } catch (\Exception $e) {
-            Log::error('[PlannedExamController@show] Errore nel recupero dell\'esaminatore', [
-                'public_id'   => $publicId,
-                'id_examiner' => $plannedExam->id_examiner,
-                'error'       => $e->getMessage(),
-                'trace'       => $e->getTraceAsString(),
-            ]);
-            $examinerResponse = null;
-        }
+        $examinerModel = $plannedExam->id_examiner
+            ? AuditorCache::find($plannedExam->id_examiner)
+            : null;
 
-        // =========================
-        // DECISION MAKER
-        // =========================
-        $decisionMakerResponse = null;
+        $decisionMakerModel = $plannedExam->id_decision_maker
+            ? AuditorCache::find($plannedExam->id_decision_maker)
+            : null;
 
-        try {
-            $decisionMakerResponse = $plannedExam->id_decision_maker
-                ? $this->examinerService->getExaminer($plannedExam->id_decision_maker)
-                : null;
-        } catch (\Exception $e) {
-            Log::error('[PlannedExamController@show] Errore nel recupero del decision maker', [
-                'public_id'         => $publicId,
-                'id_decision_maker' => $plannedExam->id_decision_maker,
-                'error'             => $e->getMessage(),
-                'trace'             => $e->getTraceAsString(),
-            ]);
-        }
-
-        // =========================
-        // MAPPATURA PERSONA
-        // =========================
-        $mapPerson = function ($response) {
-            if (empty($response['data']['data']['auditor'])) return null;
-
-            $p = $response['data']['data']['auditor'];
+        $mapPerson = function (?AuditorCache $a) {
+            if (!$a) return null;
 
             return [
-                'public_id' => $p['public_id'] ?? null,
-                'name'      => $p['name'] ?? null,
-                'surname'   => $p['surname'] ?? null,
-                'full_name' => trim(($p['name'] ?? '') . ' ' . ($p['surname'] ?? '')),
+                'public_id' => $a->public_id,
+                'name'      => $a->name,
+                'surname'   => $a->surname,
+                'full_name' => trim($a->name . ' ' . $a->surname),
             ];
         };
 
         $data = $plannedExam->toArray();
-        $data['examiner'] = $mapPerson($examinerResponse);
-        $data['decision_maker'] = $mapPerson($decisionMakerResponse);
+        $data['examiner'] = $mapPerson($examinerModel);
+        $data['decision_maker'] = $mapPerson($decisionMakerModel);
 
         // =========================
         // LOGICA USER vs ADMIN vs EXAMINER/DM
@@ -310,7 +238,7 @@ class PlannedExamController extends Controller
                 'candidates_count' => $plannedExam->plannedExamCandidates->count(),
             ]);
         } else {
-            // ❌ USER normale O examiner/decisionMaker non autorizzato → rimuovi dati candidati
+            // USER normale O examiner/decisionMaker non autorizzato → rimuovi dati candidati
             unset($data['candidate_exams']);
             unset($data['inscriptions']);
             unset($data['planned_exam_candidates']);
@@ -322,13 +250,13 @@ class PlannedExamController extends Controller
                 try {
                     $candidateId = $user->candidate->id;
 
-                    // ✔ Iscritto a QUESTA sessione
+                    // Iscritto a QUESTA sessione
                     $alreadyEnrolled = $plannedExam->inscriptions()
                         ->where('id_candidate', $candidateId)
                         ->whereNotIn('status', ['revoked', 'retired'])
                         ->exists();
 
-                    // ✔ Iscritto a stessa TIPOLOGIA ESAME
+                    // Iscritto a stessa TIPOLOGIA ESAME
                     $alreadyEnrolledSameExamType = \App\Models\PlannedExamInscription::where('id_candidate', $candidateId)
                         ->whereHas('plannedExam', function ($q) use ($plannedExam) {
                             $q->where('id_exam', $plannedExam->id_exam);
@@ -412,24 +340,12 @@ class PlannedExamController extends Controller
             return response()->json(['message' => 'Errore nel recupero dell\'esame'], 500);
         }
 
-        try {
-            $examinerData      = $this->examinerService->getExaminer($validated['id_examiner']);
-            $decisionMakerData = $this->examinerService->getExaminer($validated['id_decision_maker']);
-        } catch (\Exception $e) {
-            Log::error('[PlannedExamController@store] Errore nel recupero di esaminatore/decision maker', [
-                'id_examiner'       => $validated['id_examiner'],
-                'id_decision_maker' => $validated['id_decision_maker'],
-                'error'             => $e->getMessage(),
-                'trace'             => $e->getTraceAsString(),
-            ]);
-            return response()->json(['message' => 'Errore nel recupero dell\'esaminatore o del decision maker'], 500);
-        }
+        // Lookup locale invece di chiamata HTTP
+        $examinerCache = AuditorCache::where('public_id', $validated['id_examiner'])->first();
+        $decisionMakerCache = AuditorCache::where('public_id', $validated['id_decision_maker'])->first();
 
-        $examinerId      = $examinerData['data']['data']['auditor']['id']      ?? null;
-        $decisionMakerId = $decisionMakerData['data']['data']['auditor']['id'] ?? null;
-
-        if (!$examinerId || !$decisionMakerId) {
-            Log::warning('[PlannedExamController@store] Esaminatore o decision maker non trovato nei dati restituiti', [
+        if (!$examinerCache || !$decisionMakerCache) {
+            Log::warning('[PlannedExamController@store] Esaminatore o decision maker non trovato nella cache', [
                 'id_examiner'       => $validated['id_examiner'],
                 'id_decision_maker' => $validated['id_decision_maker'],
             ]);
@@ -439,8 +355,8 @@ class PlannedExamController extends Controller
         try {
             $plannedExam = PlannedExam::create([
                 'id_exam'           => $exam->id,
-                'id_examiner'       => $examinerId,
-                'id_decision_maker' => $decisionMakerId,
+                'id_examiner'       => $examinerCache->id,
+                'id_decision_maker' => $decisionMakerCache->id,
                 'date'              => $validated['date'],
                 'time'              => $validated['time'],
                 'end_time'          => $validated['end_time'],
@@ -509,35 +425,19 @@ class PlannedExamController extends Controller
         }
 
         if (isset($validated['id_examiner'])) {
-            try {
-                $data = $this->examinerService->getExaminer($validated['id_examiner']);
-                $id   = $data['data']['data']['auditor']['id'] ?? null;
-                if (!$id) return response()->json(['message' => 'Esaminatore non trovato'], 404);
-                $toUpdate['id_examiner'] = $id;
-            } catch (\Exception $e) {
-                Log::error('[PlannedExamController@update] Errore nel recupero dell\'esaminatore', [
-                    'id_examiner' => $validated['id_examiner'],
-                    'error'       => $e->getMessage(),
-                    'trace'       => $e->getTraceAsString(),
-                ]);
-                return response()->json(['message' => 'Errore nel recupero dell\'esaminatore'], 500);
+            $cached = AuditorCache::where('public_id', $validated['id_examiner'])->first();
+            if (!$cached) {
+                return response()->json(['message' => 'Esaminatore non trovato'], 404);
             }
+            $toUpdate['id_examiner'] = $cached->id;
         }
 
         if (isset($validated['id_decision_maker'])) {
-            try {
-                $data = $this->examinerService->getExaminer($validated['id_decision_maker']);
-                $id   = $data['data']['data']['auditor']['id'] ?? null;
-                if (!$id) return response()->json(['message' => 'Decision maker non trovato'], 404);
-                $toUpdate['id_decision_maker'] = $id;
-            } catch (\Exception $e) {
-                Log::error('[PlannedExamController@update] Errore nel recupero del decision maker', [
-                    'id_decision_maker' => $validated['id_decision_maker'],
-                    'error'             => $e->getMessage(),
-                    'trace'             => $e->getTraceAsString(),
-                ]);
-                return response()->json(['message' => 'Errore nel recupero del decision maker'], 500);
+            $cached = AuditorCache::where('public_id', $validated['id_decision_maker'])->first();
+            if (!$cached) {
+                return response()->json(['message' => 'Decision maker non trovato'], 404);
             }
+            $toUpdate['id_decision_maker'] = $cached->id;
         }
 
         try {
@@ -598,14 +498,12 @@ class PlannedExamController extends Controller
 
 
     // GET /api/planned-exams/reference-data
-// GET /api/planned-exams/reference-data
     public function referenceData()
     {
         $requestId = uniqid('refdata_', true);
 
         Log::info('[PlannedExamController@referenceData] START', [
             'request_id' => $requestId,
-            'app1_url'   => config('services.app1.url'),
         ]);
 
         try {
@@ -637,46 +535,16 @@ class PlannedExamController extends Controller
         }
 
         // =========================
-        // EXAMINERS
+        // EXAMINERS (lookup locale, niente più HTTP verso App1)
         // =========================
         try {
-            Log::info('[PlannedExamController@referenceData] Chiamata getExaminers (examiner) - INIZIO', [
-                'request_id' => $requestId,
-                'filters'    => ['type' => 'examiner', 'status' => 'qualificato'],
-            ]);
-
-            $examinersResponse = $this->examinerService->getExaminers([
-                'type'   => 'examiner',
-                'status' => 'qualificato',
-            ]);
-
-            // Log della risposta GREZZA, prima di qualunque trasformazione
-            Log::info('[PlannedExamController@referenceData] Chiamata getExaminers (examiner) - RISPOSTA GREZZA', [
-                'request_id' => $requestId,
-                'status'     => $examinersResponse['status'] ?? null,
-                'error'      => $examinersResponse['error'] ?? null,
-                'data_type'  => gettype($examinersResponse['data'] ?? null),
-                'data_keys'  => is_array($examinersResponse['data'] ?? null) ? array_keys($examinersResponse['data']) : null,
-                'full_response' => $examinersResponse, // l'intero payload, per non perdere nulla
-            ]);
-
-            $rawExaminers = $examinersResponse['data']['data'] ?? [];
-
-            Log::info('[PlannedExamController@referenceData] Examiners - prima del map', [
-                'request_id'     => $requestId,
-                'raw_count'      => is_countable($rawExaminers) ? count($rawExaminers) : 'NOT_COUNTABLE',
-                'raw_first_item' => is_array($rawExaminers) ? ($rawExaminers[0] ?? null) : null,
-            ]);
-
-            $examiners = collect($rawExaminers)
-                ->map(fn($e) => [
-                    'public_id' => $e['public_id'] ?? null,
-                    'name'      => $e['name'],
-                    'surname'   => $e['surname'],
-                ])
+            $examiners = AuditorCache::active()
+                ->where('is_examiner', 'true')
+                ->where('has_qualified_status', true)
+                ->get(['public_id', 'name', 'surname'])
                 ->values();
 
-            Log::info('[PlannedExamController@referenceData] Examiners - dopo il map, OK', [
+            Log::info('[PlannedExamController@referenceData] Examiners OK', [
                 'request_id' => $requestId,
                 'count'      => $examiners->count(),
             ]);
@@ -684,54 +552,22 @@ class PlannedExamController extends Controller
             Log::error('[PlannedExamController@referenceData] Errore nel recupero degli esaminatori', [
                 'request_id' => $requestId,
                 'error'      => $e->getMessage(),
-                'class'      => get_class($e),
-                'file'       => $e->getFile(),
-                'line'       => $e->getLine(),
                 'trace'      => $e->getTraceAsString(),
             ]);
             return response()->json(['message' => 'Errore nel recupero degli esaminatori'], 500);
         }
 
         // =========================
-        // DECISION MAKERS
+        // DECISION MAKERS (lookup locale)
         // =========================
         try {
-            Log::info('[PlannedExamController@referenceData] Chiamata getExaminers (decision_maker) - INIZIO', [
-                'request_id' => $requestId,
-                'filters'    => ['type' => 'decision_maker', 'status' => 'qualificato'],
-            ]);
-
-            $decisionMakersResponse = $this->examinerService->getExaminers([
-                'type'   => 'decision_maker',
-                'status' => 'qualificato',
-            ]);
-
-            Log::info('[PlannedExamController@referenceData] Chiamata getExaminers (decision_maker) - RISPOSTA GREZZA', [
-                'request_id'    => $requestId,
-                'status'        => $decisionMakersResponse['status'] ?? null,
-                'error'         => $decisionMakersResponse['error'] ?? null,
-                'data_type'     => gettype($decisionMakersResponse['data'] ?? null),
-                'data_keys'     => is_array($decisionMakersResponse['data'] ?? null) ? array_keys($decisionMakersResponse['data']) : null,
-                'full_response' => $decisionMakersResponse,
-            ]);
-
-            $rawDecisionMakers = $decisionMakersResponse['data']['data'] ?? [];
-
-            Log::info('[PlannedExamController@referenceData] DecisionMakers - prima del map', [
-                'request_id'     => $requestId,
-                'raw_count'      => is_countable($rawDecisionMakers) ? count($rawDecisionMakers) : 'NOT_COUNTABLE',
-                'raw_first_item' => is_array($rawDecisionMakers) ? ($rawDecisionMakers[0] ?? null) : null,
-            ]);
-
-            $decisionMakers = collect($rawDecisionMakers)
-                ->map(fn($e) => [
-                    'public_id' => $e['public_id'] ?? null,
-                    'name'      => $e['name'],
-                    'surname'   => $e['surname'],
-                ])
+            $decisionMakers = AuditorCache::active()
+                ->where('is_decision_maker', true)
+                ->where('has_qualified_status', true)
+                ->get(['public_id', 'name', 'surname'])
                 ->values();
 
-            Log::info('[PlannedExamController@referenceData] DecisionMakers - dopo il map, OK', [
+            Log::info('[PlannedExamController@referenceData] DecisionMakers OK', [
                 'request_id' => $requestId,
                 'count'      => $decisionMakers->count(),
             ]);
@@ -739,18 +575,15 @@ class PlannedExamController extends Controller
             Log::error('[PlannedExamController@referenceData] Errore nel recupero dei decision makers', [
                 'request_id' => $requestId,
                 'error'      => $e->getMessage(),
-                'class'      => get_class($e),
-                'file'       => $e->getFile(),
-                'line'       => $e->getLine(),
                 'trace'      => $e->getTraceAsString(),
             ]);
             return response()->json(['message' => 'Errore nel recupero dei decision makers'], 500);
         }
 
         Log::info('[PlannedExamController@referenceData] END - successo', [
-            'request_id'           => $requestId,
-            'exams_count'          => $exams->count(),
-            'examiners_count'      => $examiners->count(),
+            'request_id'            => $requestId,
+            'exams_count'           => $exams->count(),
+            'examiners_count'       => $examiners->count(),
             'decision_makers_count' => $decisionMakers->count(),
         ]);
 
@@ -794,20 +627,18 @@ class PlannedExamController extends Controller
                     return response()->json(['success' => false, 'message' => 'Profilo esaminatore non trovato'], 404);
                 }
 
-                // public_id locale corrisponde al public_id esterno → recupera l'id numerico esterno
-                $examinerData = $this->examinerService->getExaminer($examiner->public_id);
-                $externalId   = $examinerData['data']['data']['auditor']['id'] ?? null;
+                $cached = AuditorCache::where('public_id', $examiner->public_id)->first();
 
-                if (!$externalId) {
-                    return response()->json(['success' => false, 'message' => 'Esaminatore non trovato nel servizio esterno'], 404);
+                if (!$cached) {
+                    return response()->json(['success' => false, 'message' => 'Esaminatore non trovato nella cache'], 404);
                 }
 
-                $query->where('id_examiner', $externalId);
+                $query->where('id_examiner', $cached->id);
 
                 Log::info('[PlannedExamController@myExams] Recupero esami per esaminatore', [
                     'user_id' => $user->id,
                     'examiner_local_id' => $examiner->id,
-                    'examiner_external_id' => $externalId,
+                    'examiner_external_id' => $cached->id,
                 ]);
             } elseif ($userRole === 'decisionMaker') {
                 $decisionMaker = \App\Models\DecisionsMaker::where('id_user', $user->id)->first();
@@ -816,19 +647,18 @@ class PlannedExamController extends Controller
                     return response()->json(['success' => false, 'message' => 'Profilo decision maker non trovato'], 404);
                 }
 
-                $dmData     = $this->examinerService->getExaminer($decisionMaker->public_id);
-                $externalId = $dmData['data']['data']['auditor']['id'] ?? null;
+                $cached = AuditorCache::where('public_id', $decisionMaker->public_id)->first();
 
-                if (!$externalId) {
-                    return response()->json(['success' => false, 'message' => 'Decision maker non trovato nel servizio esterno'], 404);
+                if (!$cached) {
+                    return response()->json(['success' => false, 'message' => 'Decision maker non trovato nella cache'], 404);
                 }
 
-                $query->where('id_decision_maker', $externalId);
+                $query->where('id_decision_maker', $cached->id);
 
                 Log::info('[PlannedExamController@myExams] Recupero esami per decision maker', [
                     'user_id' => $user->id,
                     'dm_local_id' => $decisionMaker->id,
-                    'dm_external_id' => $externalId,
+                    'dm_external_id' => $cached->id,
                 ]);
             } else {
                 Log::warning('[PlannedExamController@myExams] Ruolo non autorizzato', [

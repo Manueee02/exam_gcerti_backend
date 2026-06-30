@@ -2,6 +2,7 @@
 
 
 use App\Http\Controllers\AuditorSyncController;
+use App\Http\Controllers\ExaminerCacheController;
 use App\Http\Controllers\ExamSessionController;
 use App\Http\Controllers\CandidateController;
 use App\Http\Controllers\EmailVerificationController;
@@ -36,11 +37,13 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
-// routes/api.php (App2) — protette da middleware dedicato
-Route::middleware('internal.sync.auth', 'log.activity')->prefix('internal/sync')->group(function () {
-    Route::post('/auditor', [AuditorSyncController::class, 'upsert']);
-    Route::delete('/auditor/{id}', [AuditorSyncController::class, 'delete']);
-});
+// routes/api.php 
+Route::middleware(['internal.sync.auth', 'log.activity'])
+    ->prefix('internal/sync')
+    ->group(function () {
+        Route::post('auditor', [AuditorSyncController::class, 'upsert']);
+        Route::post('auditor/{id}/deactivate', [AuditorSyncController::class, 'deactivate']);
+    });
 
 Route::middleware('log.activity')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->name('login');
@@ -134,11 +137,13 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
                 Route::put('/{id}', [ExaminerController::class, 'update']);
                 Route::delete('/{id}', [ExaminerController::class, 'destroy']);
                 Route::post('/{id}/create-user', [ExaminerController::class, 'createUser']);
-                Route::get('/serverApp/examiner-decisionmaker', [Server1Controller::class, 'index']);
+/*                Route::get('/serverApp/examiner-decisionmaker', [Server1Controller::class, 'index']);
                 Route::get('/serverApp/show/{id}', [Server1Controller::class, 'show']);
                 Route::put('/serverApp/update/{id}', [Server1Controller::class, 'updateExaminer']);
                 Route::post('/serverApp/qualifications/update-status', [Server1Controller::class, 'updateQualificationStatus']);
-                Route::post('/serverApp/qualifications/update-status/noIaf', [Server1Controller::class, 'updateQualificationStatusNoIaf']);
+                Route::post('/serverApp/qualifications/update-status/noIaf', [Server1Controller::class, 'updateQualificationStatusNoIaf']);*/
+                Route::get('/serverApp/examiner-decisionmaker', [ExaminerCacheController::class, 'index']);
+                Route::get('/serverApp/examiner-decisionmaker/{publicId}', [ExaminerCacheController::class, 'show']);
             }
         );
 

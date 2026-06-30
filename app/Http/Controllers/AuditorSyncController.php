@@ -1,19 +1,15 @@
 <?php
 
-// app/Http/Controllers/Internal/AuditorSyncController.php
 namespace App\Http\Controllers;
 
-
 use App\Models\AuditorCache;
-use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 
 class AuditorSyncController extends Controller
 {
-    use AuthorizesRequests;
-
+    // POST /api/internal/sync/auditor
     public function upsert(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -36,6 +32,8 @@ class AuditorSyncController extends Controller
             'app1_updated_at'       => 'nullable|date',
         ]);
 
+        // Un upsert significa sempre "questo auditor è rilevante ora" → riattiva
+        $validated['is_active'] = true;
         $validated['synced_at'] = now();
 
         $record = AuditorCache::updateOrCreate(
@@ -43,16 +41,30 @@ class AuditorSyncController extends Controller
             $validated
         );
 
-        Log::info('[AuditorSyncController] Auditor sincronizzato', ['id' => $record->id]);
+        Log::info('[AuditorSyncController] Auditor sincronizzato (attivo)', ['id' => $record->id]);
 
         return response()->json(['success' => true, 'id' => $record->id]);
     }
 
-    // DELETE /api/internal/sync/auditor/{id}
-    public function delete(int $id): JsonResponse
+    // POST /api/internal/sync/auditor/{id}/deactivate
+    // Sostituisce la vecchia delete fisica: l'auditor non è più examiner/DM
+    // rilevante (oppure è stato cancellato su App1), ma il record resta
+    // in cache per mantenere l'integrità referenziale con planned_exams storici.
+    public function deactivate(int $id): JsonResponse
     {
-        AuditorCache::where('id', $id)->delete();
-        Log::info('[AuditorSyncController] Auditor rimosso dalla cache', ['id' => $id]);
+        $record = AuditorCache::where('id', $id)->first();
+
+        if (!$record) {
+            // Non lo abbiamo mai avuto in cache: non c'è nulla da disattivare,
+            // non è un errore (idempotente).
+            Log::info('[AuditorSyncController] Deactivate su id non presente in cache', ['id' => $id]);
+            return response()->json(['success' => true, 'note' => 'not_found_noop']);
+        }
+
+        $record->update(['is_active' => false, 'synced_at' => now()]);
+
+        Log::info('[AuditorSyncController] Auditor disattivato nella cache', ['id' => $id]);
+
         return response()->json(['success' => true]);
     }
 }
