@@ -2,12 +2,37 @@
 
 namespace App\Policies;
 
+use App\Models\AuditorCache;
 use App\Models\ExamSession;
 use App\Models\PlannedExam;
 use App\Models\User;
+use App\Models\UserCreatedExaminerDecisionmaker;
 
 class ExamSessionPolicy
 {
+    /**
+     * Risolve l'id numerico App1 dell'auditor associato a un utente locale.
+     * Usa auditors_cache come fonte di verità locale, evitando qualsiasi
+     * chiamata HTTP verso App1 a runtime.
+     * Restituisce null se l'utente non ha un auditor associato o se
+     * l'auditor non è presente in cache.
+     */
+    private function resolveAuditorId(User $user): ?int
+    {
+        $link = UserCreatedExaminerDecisionmaker::where('id_user', $user->id)->first();
+
+        if (!$link) {
+            return null;
+        }
+
+        $auditor = AuditorCache::where('public_id', $link->auditor_public_id)->first();
+
+        return $auditor?->id;
+    }
+
+    /**
+     * Examiner può avviare sessione
+     */
     public function start(User $user, PlannedExam $plannedExam): bool
     {
         $user->loadMissing('role');
@@ -17,12 +42,16 @@ class ExamSessionPolicy
         }
 
         if ($user->role->name === 'examiner') {
-            return $plannedExam->id_examiner === $user->id;
+            $auditorId = $this->resolveAuditorId($user);
+            return $auditorId !== null && $plannedExam->id_examiner === $auditorId;
         }
 
         return false;
     }
 
+    /**
+     * Examiner può chiudere sessione
+     */
     public function end(User $user, ExamSession $session): bool
     {
         $user->loadMissing('role');
@@ -32,12 +61,16 @@ class ExamSessionPolicy
         }
 
         if ($user->role->name === 'examiner') {
-            return $session->plannedExam->id_examiner === $user->id;
+            $auditorId = $this->resolveAuditorId($user);
+            return $auditorId !== null && $session->plannedExam->id_examiner === $auditorId;
         }
 
         return false;
     }
 
+    /**
+     * Examiner abilita candidato
+     */
     public function enableCandidate(User $user, ExamSession $session): bool
     {
         $user->loadMissing('role');
@@ -47,17 +80,15 @@ class ExamSessionPolicy
         }
 
         if ($user->role->name === 'examiner') {
-            return $session->plannedExam->id_examiner === $user->id;
+            $auditorId = $this->resolveAuditorId($user);
+            return $auditorId !== null && $session->plannedExam->id_examiner === $auditorId;
         }
 
         return false;
     }
 
     /**
-     * Chi puo' vedere il log completo (con is_correct) di un candidato:
-     * stessa regola di end()/enableCandidate(). Eredita lo stesso limite
-     * gia' discusso sul confronto id_examiner/$user->id per il ruolo
-     * 'examiner' — non corretto qui di proposito, e' un task separato.
+     * Admin/examiner può vedere il log completo di un candidato
      */
     public function viewCandidateLog(User $user, ExamSession $session): bool
     {
@@ -68,12 +99,16 @@ class ExamSessionPolicy
         }
 
         if ($user->role->name === 'examiner') {
-            return $session->plannedExam->id_examiner === $user->id;
+            $auditorId = $this->resolveAuditorId($user);
+            return $auditorId !== null && $session->plannedExam->id_examiner === $auditorId;
         }
 
         return false;
     }
 
+    /**
+     * Candidato può entrare nella sessione
+     */
     public function accessCandidateExam(User $user, ExamSession $session): bool
     {
         $user->loadMissing('role');
@@ -92,6 +127,9 @@ class ExamSessionPolicy
             ->exists();
     }
 
+    /**
+     * Candidato può rispondere
+     */
     public function submitAnswer(User $user, ExamSession $session): bool
     {
         $user->loadMissing('role');

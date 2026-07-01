@@ -37,7 +37,7 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
-// routes/api.php 
+// routes/api.php
 Route::middleware(['internal.sync.auth', 'log.activity'])
     ->prefix('internal/sync')
     ->group(function () {
@@ -158,7 +158,6 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
                 Route::post('/', [DecisionMakerController::class, 'store']);
                 Route::put('/{id}', [DecisionMakerController::class, 'update']);
                 Route::delete('/{id}', [DecisionMakerController::class, 'destroy']);
-                Route::post('/{id}/create-user', [DecisionMakerController::class, 'createUser']);
             }
         );
 

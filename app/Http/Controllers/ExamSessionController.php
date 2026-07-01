@@ -12,6 +12,12 @@ use App\Services\ExamEngineService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 
+/*
+ Request HTTP
+  → Controller: $this->authorize('submitAnswer', $session)
+    → ExamSessionPolicy::submitAnswer() — chi può?
+      → ExamEngineService::submitAnswer() — cosa fa?*/
+
 class ExamSessionController extends Controller
 {
 
