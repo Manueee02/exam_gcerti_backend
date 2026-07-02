@@ -173,11 +173,9 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             }
         );
     Route::get('planned-exams/', [PlannedExamController::class, 'index']);
-
     // Esami assegnati all'utente loggato (examiner o decision maker)
     Route::middleware('role:examiner,decisionMaker')
         ->get('/my-exams', [PlannedExamController::class, 'myExams']);
-
     // Dettaglio esame (accessibile a tutti gli utenti autenticati)
     Route::get('/planned-exams/show/{public_id}', [PlannedExamController::class, 'show']);
 
@@ -269,11 +267,14 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::post('/end/{sessionPublicId}', [ExamSessionController::class, 'end']);
             Route::post('/{sessionPublicId}/enable-candidate', [ExamSessionController::class, 'enableCandidate']);
             Route::get('/{sessionPublicId}/candidates/{candidatePublicId}/activity-log', [ExamSessionController::class, 'candidateActivityLog']);
+            Route::get('/{sessionPublicId}/runs', [ExamSessionController::class, 'getRuns']);
         });
     Route::middleware('role:user')
         ->prefix('exam-sessions')
         ->group(
             function () {
+                Route::post('/{sessionPublicId}/join', [ExamSessionController::class, 'join']);
+                Route::get('/{plannedExamPublicId}/active-session', [ExamSessionController::class, 'getActiveSession']);
                 Route::get('/{sessionPublicId}/candidate', [ExamSessionController::class, 'getCandidateExam']);
                 Route::post('/{sessionPublicId}/answer', [ExamSessionController::class, 'submitAnswer']);
                 Route::get('/{sessionPublicId}/score', [ExamSessionController::class, 'score']);

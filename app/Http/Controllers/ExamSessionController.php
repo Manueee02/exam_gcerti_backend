@@ -6,6 +6,7 @@ use App\Http\Requests\SubmitAnswerRequest;
 use App\Models\Answer;
 use App\Models\Candidate;
 use App\Models\ExamSession;
+use App\Models\ExamSessionCandidateRun;
 use App\Models\PlannedExam;
 use App\Models\Question;
 use App\Services\ExamEngineService;
@@ -327,5 +328,76 @@ class ExamSessionController extends Controller
             'success' => true,
             'data' => $data,
         ]);
+    }
+
+    /**
+     * GET /api/exam-sessions/active/{plannedExamPublicId}
+     * Restituisce la sessione attiva per un dato planned exam.
+     * Usato dal candidato per trovare la sessione appena aperta.
+     */
+    public function getActiveSession(
+        Request $request,
+        string $plannedExamPublicId
+    ) {
+        $plannedExam = PlannedExam::where('public_id', $plannedExamPublicId)->firstOrFail();
+
+        $session = ExamSession::where('id_planned_exam', $plannedExam->id)
+            ->where('status', 'live')
+            ->first();
+
+        if (!$session) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Nessuna sessione attiva per questo esame',
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data'    => [
+                'session_public_id'      => $session->public_id,
+                'planned_exam_public_id' => $plannedExamPublicId,
+            ],
+        ]);
+    }
+
+    /**
+     * GET /api/exam-sessions/{sessionPublicId}/runs
+     * Stato di tutti i candidati nella sessione — per l'esaminatore.
+     */
+    public function getRuns(Request $request, string $sessionPublicId)
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $this->authorize('enableCandidate', $session);
+
+        $runs = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->with(['candidate:id,public_id,name,surname'])
+            ->get()
+            ->map(fn ($run) => [
+                'candidate_public_id' => $run->candidate->public_id,
+                'candidate_name'      => $run->candidate->name . ' ' . $run->candidate->surname,
+                'status'              => $run->status,
+            ]);
+
+        return response()->json(['success' => true, 'data' => $runs]);
+    }
+
+    /**
+     * POST /api/exam-sessions/{sessionPublicId}/join
+     * Chiamato dal frontend candidato appena entra nella pagina sessione.
+     */
+    public function join(Request $request, string $sessionPublicId)
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $this->authorize('accessCandidateExam', $session);
+
+        $this->engine->candidateJoined(
+            $sessionPublicId,
+            $request->user()->candidate->id
+        );
+
+        return response()->json(['success' => true]);
     }
 }

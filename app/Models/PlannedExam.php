@@ -32,7 +32,7 @@ class PlannedExam extends Model
         'id_test_center' => 'integer',
         'id_examiner' => 'integer',
         'id_decision_maker' => 'integer',
-        'date' => 'date',
+/*        'date' => 'date',*/
         'time' => 'datetime:H:i',
         'end_time' => 'datetime:H:i',
         'created_at' => 'datetime',

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\ExamRunsUpdated;
 use App\Models\Answer;
 use App\Models\Exam;
 use App\Models\ExamArea;
@@ -21,6 +22,22 @@ use Illuminate\Support\Facades\Log;
 
 class ExamEngineService
 {
+
+    private function broadcastRunsUpdate(ExamSession $session): void
+    {
+        $runs = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->with('candidate:id,public_id,name,surname')
+            ->get()
+            ->map(fn ($run) => [
+                'candidate_public_id' => $run->candidate->public_id,
+                'candidate_name'      => $run->candidate->name . ' ' . $run->candidate->surname,
+                'status'              => $run->status,
+            ])
+            ->all();
+
+        broadcast(new ExamRunsUpdated($session->public_id, $runs));
+    }
+
     /**
      * =========================================================
      * START SESSION
@@ -198,6 +215,15 @@ class ExamEngineService
 
             $session->refresh();
 
+            // Notifica i candidati che la sessione è aperta
+            broadcast(new \App\Events\ExamSessionActivated(
+                $plannedExam->public_id,
+                $session->public_id
+            ));
+
+            // Mostra subito all'esaminatore tutti i candidati in stato pending
+            $this->broadcastRunsUpdate($session);
+
             return $session;
         });
     }
@@ -232,6 +258,8 @@ class ExamEngineService
         $run->update([
             'status' => 'authorized',
         ]);
+
+        $this->broadcastRunsUpdate($session);
 
         $this->logEvent(
             $session->id,
@@ -309,6 +337,8 @@ class ExamEngineService
                 'status' => 'in_progress',
                 'started_at' => now(),
             ]);
+
+            $this->broadcastRunsUpdate($session);
 
             $this->logEvent(
                 $session->id,
@@ -945,6 +975,7 @@ class ExamEngineService
                 'timed_out_at' => now()->toIso8601String(),
                 'elapsed_seconds' => $startedAt->diffInSeconds(now()),
             ]);
+            $this->broadcastRunsUpdate($session);
             throw new \Exception('Tempo esame terminato');
         }
     }
@@ -1058,6 +1089,8 @@ class ExamEngineService
                 'current_exam_level_id' => null,
             ]);
 
+            $this->broadcastRunsUpdate($session);
+
             $totalDurationSeconds = $run->started_at
                 ? Carbon::parse($run->started_at)->diffInSeconds(now())
                 : null;
@@ -1154,5 +1187,39 @@ class ExamEngineService
             'current_level' => null,
             'questions' => collect(),
         ];
+    }
+
+    /**
+     * Il candidato ha aperto la pagina della sessione.
+     * Transita il suo run da pending → waiting così l'esaminatore
+     * vede che è presente e può abilitarlo.
+     */
+    public function candidateJoined(
+        string $sessionPublicId,
+        int $candidateId
+    ): void {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->firstOrFail();
+
+        // Transita solo se è ancora pending — evita sovrascritture
+        if ($run->status !== 'pending') {
+            return;
+        }
+
+        $run->update(['status' => 'waiting']);
+
+        $this->logEvent(
+            $session->id,
+            'CANDIDATE_JOINED_SESSION',
+            'candidate',
+            $candidateId,
+            ['joined_at' => now()->toIso8601String()]
+        );
+
+        // Notifica l'esaminatore in tempo reale
+        $this->broadcastRunsUpdate($session);
     }
 }

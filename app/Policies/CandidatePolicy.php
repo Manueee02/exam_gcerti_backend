@@ -25,7 +25,7 @@ class CandidatePolicy
         $user->loadMissing('role');
 
         // Admin e superAdmin possono vedere tutto
-        if (in_array($user->role->name, ['admin', 'superAdmin'])) {
+        if (in_array($user->role->name, ['admin', 'superAdmin', 'examiner', 'decisionMaker'])) {
             return true;
         }
 

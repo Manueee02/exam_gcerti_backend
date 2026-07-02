@@ -40,4 +40,9 @@ class ExamSessionCandidateRun extends Model
     {
         return $this->hasMany(ExamSessionCandidateQuestion::class, 'id_candidate_run');
     }
+
+    public function candidate()
+    {
+        return $this->belongsTo(Candidate::class, 'id_candidate');
+    }
 }
