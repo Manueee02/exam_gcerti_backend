@@ -96,4 +96,8 @@ class PlannedExam extends Model
         return $this->hasMany(PlannedExamInscription::class, 'id_planned_exam');
     }
 
+    public function examSessions()
+    {
+        return $this->hasMany(ExamSession::class, 'id_planned_exam');
+    }
 }

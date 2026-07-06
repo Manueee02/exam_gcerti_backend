@@ -727,7 +727,6 @@ class CandidateController extends Controller
     public function getEvents(string $id): \Illuminate\Http\JsonResponse
     {
         try {
-            // Recupera il candidato tramite public_id
             $candidate = Candidate::where('public_id', $id)->first();
 
             if (!$candidate) {
@@ -741,12 +740,15 @@ class CandidateController extends Controller
                 ], 404);
             }
 
-            // 🔒 Autorizzazione
             $this->authorize('view', $candidate);
 
-            // Recupera gli esami pianificati del candidato con le relazioni
+            // Eager load della relazione con le exam_sessions collegate,
+            // filtrando già solo quelle 'live' per evitare N+1 query
             $plannedExamsCandidates = \App\Models\PlannedExamCandidate::with([
                 'plannedExam.exam',
+                'plannedExam.examSessions' => function ($query) {
+                    $query->where('status', 'live');
+                },
             ])
                 ->where('id_candidate', $candidate->id)
                 ->orderBy('created_at', 'desc')
@@ -760,20 +762,23 @@ class CandidateController extends Controller
                 ]);
             }
 
-            // Mapping della risposta
             $events = $plannedExamsCandidates->map(function ($pec) {
                 $plannedExam = $pec->plannedExam;
                 $exam        = $plannedExam?->exam;
 
+                // Vero stato "live" letto direttamente da exam_sessions,
+                // non da un flag statico — così funziona anche dopo un reload
+                $hasLiveSession = $plannedExam
+                    ? $plannedExam->examSessions->isNotEmpty()
+                    : false;
+
                 return [
-                    // -- Dati iscrizione candidato all'esame --
                     'enrollment' => [
                         'public_id'  => $pec->public_id,
                         'created_at' => $pec->created_at,
                         'updated_at' => $pec->updated_at,
                     ],
 
-                    // -- Dati esame pianificato --
                     'planned_exam' => $plannedExam ? [
                         'public_id'           => $plannedExam->public_id,
                         'date'                => $plannedExam->date,
@@ -782,10 +787,9 @@ class CandidateController extends Controller
                         'location'            => $plannedExam->location,
                         'created_at'          => $plannedExam->created_at,
                         'updated_at'          => $plannedExam->updated_at,
-                        'active_exam_session' => $plannedExam->active_exam_session,
+                        'active_exam_session' => $hasLiveSession,
                     ] : null,
 
-                    // -- Dati esame --
                     'exam' => $exam ? [
                         'public_id'   => $exam->public_id,
                         'name'        => $exam->name,
@@ -798,22 +802,11 @@ class CandidateController extends Controller
                 ];
             });
 
-
-
             return response()->json([
                 'success' => true,
                 'count'   => $events->count(),
                 'events'  => $events,
             ], 200);
-        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
-            Log::warning('[CandidateController] Accesso non autorizzato in getEvents.', [
-                'public_id' => $id,
-                'user_id'   => auth()->id(),
-            ]);
-            return response()->json([
-                'success' => false,
-                'message' => 'Non autorizzato a visualizzare gli eventi di questo candidato.',
-            ], 403);
         } catch (\Throwable $e) {
             Log::error('[CandidateController] Errore durante il recupero degli eventi del candidato.', [
                 'public_id' => $id,

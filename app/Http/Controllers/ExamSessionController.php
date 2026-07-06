@@ -400,4 +400,62 @@ class ExamSessionController extends Controller
 
         return response()->json(['success' => true]);
     }
+
+    /**
+     * POST /api/exam-sessions/{sessionPublicId}/terminate-candidate
+     * L'esaminatore termina forzatamente il run di un candidato specifico.
+     */
+    public function terminateCandidate(
+        Request $request,
+        string $sessionPublicId
+    ): \Illuminate\Http\JsonResponse {
+        $request->validate([
+            'candidate_id' => ['required', 'uuid'],
+            'reason'       => ['required', 'string', 'max:500'],
+        ]);
+
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+        $this->authorize('enableCandidate', $session);
+
+        $candidate = Candidate::where('public_id', $request->candidate_id)->firstOrFail();
+
+        $this->engine->terminateCandidate(
+            $sessionPublicId,
+            $candidate->id,
+            $request->reason,
+            $this->requestMeta($request)
+        );
+
+        return response()->json(['success' => true]);
+    }
+
+    // In ExamSessionController
+    public function logSocketEvent(Request $request, string $sessionPublicId): \Illuminate\Http\JsonResponse
+    {
+        $request->validate([
+            'event'   => ['required', 'string'],
+            'channel' => ['required', 'string'],
+        ]);
+
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        // Usa direttamente ExamSessionLog invece del service
+        // perché non vogliamo creare dipendenze circolari
+        \App\Models\ExamSessionLog::create([
+            'id_exam_session' => $session->id,
+            'event_type'      => $request->event,
+            'actor_type'      => 'websocket',
+            'actor_id'        => $request->user()->candidate?->id,
+            'payload'         => [
+                'channel'    => $request->channel,
+                'ip'         => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'logged_at'  => now()->toIso8601String(),
+            ],
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+
+
 }

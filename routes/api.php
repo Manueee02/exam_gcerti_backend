@@ -268,6 +268,7 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::post('/{sessionPublicId}/enable-candidate', [ExamSessionController::class, 'enableCandidate']);
             Route::get('/{sessionPublicId}/candidates/{candidatePublicId}/activity-log', [ExamSessionController::class, 'candidateActivityLog']);
             Route::get('/{sessionPublicId}/runs', [ExamSessionController::class, 'getRuns']);
+            Route::post('/{sessionPublicId}/terminate-candidate', [ExamSessionController::class, 'terminateCandidate']);
         });
     Route::middleware('role:user')
         ->prefix('exam-sessions')
@@ -278,6 +279,8 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
                 Route::get('/{sessionPublicId}/candidate', [ExamSessionController::class, 'getCandidateExam']);
                 Route::post('/{sessionPublicId}/answer', [ExamSessionController::class, 'submitAnswer']);
                 Route::get('/{sessionPublicId}/score', [ExamSessionController::class, 'score']);
+                Route::post('/{sessionPublicId}/log-socket-event', [ExamSessionController::class, 'logSocketEvent']);
+
             }
         );
 });
