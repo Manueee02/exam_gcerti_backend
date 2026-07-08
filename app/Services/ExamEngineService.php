@@ -194,28 +194,31 @@ class ExamEngineService
     public function candidateJoined(
         string $sessionPublicId,
         int $candidateId
-    ): void {
+    ): array {
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
         $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
             ->where('id_candidate', $candidateId)
             ->firstOrFail();
 
-        if ($run->status !== 'pending') {
-            return;
+        if ($run->status === 'pending') {
+            $run->update(['status' => 'waiting']);
+
+            $this->logEvent(
+                $session->id,
+                'CANDIDATE_JOINED_SESSION',
+                'candidate',
+                $candidateId,
+                ['joined_at' => now()->toIso8601String()]
+            );
+
+            $this->broadcastRunsUpdate($session);
         }
 
-        $run->update(['status' => 'waiting']);
-
-        $this->logEvent(
-            $session->id,
-            'CANDIDATE_JOINED_SESSION',
-            'candidate',
-            $candidateId,
-            ['joined_at' => now()->toIso8601String()]
-        );
-
-        $this->broadcastRunsUpdate($session);
+        return [
+            'session_status' => $session->status,
+            'run_status'      => $run->status,
+        ];
     }
 
     // =========================================================
@@ -1041,5 +1044,47 @@ class ExamEngineService
             'current_level' => null,
             'questions'     => collect(),
         ];
+    }
+
+    public function heartbeat(string $sessionPublicId, int $candidateId): void
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->first();
+
+        if (!$run || !in_array($run->status, ['waiting', 'authorized', 'in_progress'])) {
+            return;
+        }
+
+        $run->update(['last_heartbeat_at' => now()]);
+    }
+
+    public function terminateStaleConnections(int $timeoutSeconds = 45): int
+    {
+        $staleRuns = ExamSessionCandidateRun::whereIn('status', ['waiting', 'authorized', 'in_progress'])
+            ->whereNotNull('last_heartbeat_at')
+            ->where('last_heartbeat_at', '<', now()->subSeconds($timeoutSeconds))
+            ->get();
+
+        $count = 0;
+
+        foreach ($staleRuns as $run) {
+            $session = ExamSession::find($run->id_exam_session);
+            if (!$session || $session->status !== 'live') continue;
+
+            $run->update(['status' => 'terminated', 'ended_at' => now()]);
+
+            $this->logEvent(
+                $session->id, 'CANDIDATE_DISCONNECTED', 'system', $run->id_candidate,
+                ['reason' => 'heartbeat_timeout', 'last_heartbeat_at' => $run->last_heartbeat_at?->toIso8601String()]
+            );
+
+            $this->broadcastRunsUpdate($session);
+            $count++;
+        }
+
+        return $count;
     }
 }

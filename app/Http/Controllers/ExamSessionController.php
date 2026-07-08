@@ -393,12 +393,12 @@ class ExamSessionController extends Controller
 
         $this->authorize('accessCandidateExam', $session);
 
-        $this->engine->candidateJoined(
+        $data = $this->engine->candidateJoined(
             $sessionPublicId,
             $request->user()->candidate->id
         );
 
-        return response()->json(['success' => true]);
+        return response()->json(['success' => true, 'data' => $data]);
     }
 
     /**
@@ -457,5 +457,13 @@ class ExamSessionController extends Controller
         return response()->json(['success' => true]);
     }
 
+    public function heartbeat(Request $request, string $sessionPublicId): \Illuminate\Http\JsonResponse
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+        $this->authorize('accessCandidateExam', $session);
 
+        $this->engine->heartbeat($sessionPublicId, $request->user()->candidate->id);
+
+        return response()->json(['success' => true]);
+    }
 }

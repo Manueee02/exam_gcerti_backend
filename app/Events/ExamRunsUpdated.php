@@ -4,11 +4,11 @@ namespace App\Events;
 
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class ExamRunsUpdated implements ShouldBroadcast
+class ExamRunsUpdated implements ShouldBroadcastNow
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
@@ -19,9 +19,6 @@ class ExamRunsUpdated implements ShouldBroadcast
 
     public function broadcastOn(): Channel
     {
-        // Canale pubblico nominato per sessione — in Fase 4
-        // puoi renderlo privato con PrivateChannel e autenticare
-        // l'examiner, per ora Channel è sufficiente in locale
         return new Channel("exam-session.{$this->sessionPublicId}");
     }
 
