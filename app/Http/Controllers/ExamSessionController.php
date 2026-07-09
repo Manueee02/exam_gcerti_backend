@@ -437,26 +437,20 @@ class ExamSessionController extends Controller
             'channel' => ['required', 'string'],
         ]);
 
-        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
-
-        // Usa direttamente ExamSessionLog invece del service
-        // perché non vogliamo creare dipendenze circolari
-        \App\Models\ExamSessionLog::create([
-            'id_exam_session' => $session->id,
-            'event_type'      => $request->event,
-            'actor_type'      => 'websocket',
-            'actor_id'        => $request->user()->candidate?->id,
-            'payload'         => [
+        $this->engine->logClientEvent(
+            $sessionPublicId,
+            $request->event,
+            $request->user()->candidate?->id,
+            [
                 'channel'    => $request->channel,
                 'ip'         => $request->ip(),
                 'user_agent' => $request->userAgent(),
                 'logged_at'  => now()->toIso8601String(),
-            ],
-        ]);
+            ]
+        );
 
         return response()->json(['success' => true]);
     }
-
     public function heartbeat(Request $request, string $sessionPublicId): \Illuminate\Http\JsonResponse
     {
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
@@ -466,4 +460,6 @@ class ExamSessionController extends Controller
 
         return response()->json(['success' => true]);
     }
+
+
 }

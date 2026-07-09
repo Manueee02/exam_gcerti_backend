@@ -18,6 +18,7 @@ class ExamSessionLog extends Model
         'actor_id',
         'payload',
         'created_at',
+        'id_candidate'
     ];
 
     protected $casts = [
@@ -30,5 +31,10 @@ class ExamSessionLog extends Model
     public function session(): BelongsTo
     {
         return $this->belongsTo(ExamSession::class, 'id_exam_session');
+    }
+
+    public function candidate(): BelongsTo
+    {
+        return $this->belongsTo(Candidate::class, 'id_candidate');
     }
 }

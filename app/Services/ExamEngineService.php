@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Answer;
+use App\Models\Candidate;
 use App\Models\Exam;
 use App\Models\ExamArea;
 use App\Models\ExamExtractionRule;
@@ -76,7 +77,8 @@ class ExamEngineService
                     'scheduled_date'       => $datePart,
                     'scheduled_time'       => $timePart,
                     'total_candidates'     => $candidates->count(),
-                ], $requestMeta)
+                ], $requestMeta),
+                null // evento di sessione, non appartiene a un candidato specifico
             );
 
             foreach ($candidates as $candidate) {
@@ -115,7 +117,8 @@ class ExamEngineService
                         'questions_count' => count($questions),
                         'question_ids'    => $questions->pluck('id')->values(),
                         'groups'          => $groupsBreakdown,
-                    ]
+                    ],
+                    $candidate->id_candidate
                 );
 
                 $firstGroup = $this->resolveFirstGroup($plannedExam->id_exam);
@@ -135,7 +138,8 @@ class ExamEngineService
                     'LEVEL_STARTED',
                     'system',
                     $candidate->id_candidate,
-                    $this->buildLevelStartedPayload($firstGroup['area'], $firstGroup['level'])
+                    $this->buildLevelStartedPayload($firstGroup['area'], $firstGroup['level']),
+                    $candidate->id_candidate
                 );
             }
 
@@ -181,7 +185,8 @@ class ExamEngineService
             $this->withMeta([
                 'candidate_id'  => $candidateId,
                 'authorized_at' => now()->toIso8601String(),
-            ], $requestMeta)
+            ], $requestMeta),
+            $candidateId
         );
 
         // Notifica in tempo reale sia l'esaminatore che il candidato
@@ -209,7 +214,8 @@ class ExamEngineService
                 'CANDIDATE_JOINED_SESSION',
                 'candidate',
                 $candidateId,
-                ['joined_at' => now()->toIso8601String()]
+                ['joined_at' => now()->toIso8601String()],
+                $candidateId
             );
 
             $this->broadcastRunsUpdate($session);
@@ -222,7 +228,94 @@ class ExamEngineService
     }
 
     // =========================================================
-    // TERMINATE CANDIDATE
+    // HEARTBEAT (liveness candidato)
+    // =========================================================
+    public function heartbeat(string $sessionPublicId, int $candidateId): void
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->first();
+
+        if (!$run || !in_array($run->status, ['waiting', 'authorized', 'in_progress'])) {
+            return;
+        }
+
+        $run->update(['last_heartbeat_at' => now()]);
+    }
+
+    // =========================================================
+    // DISCONNESSIONE CANDIDATO (self-report o rilevata dallo sweep)
+    // =========================================================
+    public function candidateDisconnected(
+        string $sessionPublicId,
+        int $candidateId,
+        ?array $requestMeta = null
+    ): void {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->first();
+
+        if (!$run || in_array($run->status, ['completed', 'timeout', 'terminated', 'pending'])) {
+            return;
+        }
+
+        $run->update(['status' => 'terminated', 'ended_at' => now()]);
+
+        $this->logEvent(
+            $session->id,
+            'CANDIDATE_DISCONNECTED',
+            'candidate',
+            $candidateId,
+            $this->withMeta(['detected_at' => now()->toIso8601String()], $requestMeta),
+            $candidateId
+        );
+
+        $this->broadcastRunsUpdate($session);
+    }
+
+    // =========================================================
+    // SWEEP PERIODICO — termina run senza heartbeat da troppo tempo
+    // =========================================================
+    public function terminateStaleConnections(int $timeoutSeconds = 45): int
+    {
+        $staleRuns = ExamSessionCandidateRun::whereIn('status', ['waiting', 'authorized', 'in_progress'])
+            ->whereNotNull('last_heartbeat_at')
+            ->where('last_heartbeat_at', '<', now()->subSeconds($timeoutSeconds))
+            ->get();
+
+        $count = 0;
+
+        foreach ($staleRuns as $run) {
+            $session = ExamSession::find($run->id_exam_session);
+            if (!$session || $session->status !== 'live') continue;
+
+            $run->update(['status' => 'terminated', 'ended_at' => now()]);
+
+            $this->logEvent(
+                $session->id,
+                'CANDIDATE_DISCONNECTED',
+                'system',
+                $run->id_candidate,
+                [
+                    'reason'            => 'heartbeat_timeout',
+                    'last_heartbeat_at' => $run->last_heartbeat_at?->toIso8601String(),
+                ],
+                $run->id_candidate
+            );
+
+            $this->broadcastRunsUpdate($session);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    // =========================================================
+    // TERMINATE CANDIDATE (azione manuale dell'esaminatore)
     // =========================================================
     public function terminateCandidate(
         string $sessionPublicId,
@@ -253,7 +346,8 @@ class ExamEngineService
             $this->withMeta([
                 'reason'        => $reason,
                 'terminated_at' => now()->toIso8601String(),
-            ], $requestMeta)
+            ], $requestMeta),
+            $candidateId
         );
 
         $this->broadcastRunsUpdate($session);
@@ -300,7 +394,8 @@ class ExamEngineService
                     'exam_ends_at'           => $exam && $exam->duration_minutes
                         ? now()->copy()->addMinutes($exam->duration_minutes)->toIso8601String()
                         : null,
-                ], $requestMeta)
+                ], $requestMeta),
+                $candidateId
             );
 
             // Notifica l'esaminatore che il candidato ha iniziato l'esame
@@ -402,7 +497,8 @@ class ExamEngineService
                 'UNAUTHORIZED_QUESTION_ACCESS',
                 'candidate',
                 $candidateId,
-                $this->withMeta(['question_id' => $questionId, 'reason' => 'fuori dal livello corrente'], $requestMeta)
+                $this->withMeta(['question_id' => $questionId, 'reason' => 'fuori dal livello corrente'], $requestMeta),
+                $candidateId
             );
             throw new \Exception('Domanda non appartenente al livello corrente');
         }
@@ -417,7 +513,8 @@ class ExamEngineService
                 'UNAUTHORIZED_QUESTION_ACCESS',
                 'candidate',
                 $candidateId,
-                $this->withMeta(['question_id' => $questionId], $requestMeta)
+                $this->withMeta(['question_id' => $questionId], $requestMeta),
+                $candidateId
             );
             throw new \Exception('Domanda non assegnata');
         }
@@ -433,7 +530,8 @@ class ExamEngineService
                 'DUPLICATE_ANSWER_ATTEMPT',
                 'candidate',
                 $candidateId,
-                $this->withMeta(['question_id' => $questionId], $requestMeta)
+                $this->withMeta(['question_id' => $questionId], $requestMeta),
+                $candidateId
             );
             throw new \Exception('Domanda già risposta');
         }
@@ -463,7 +561,10 @@ class ExamEngineService
                 ]);
             } catch (\Illuminate\Database\QueryException $e) {
                 if ($e->getCode() === '23505') {
-                    $this->logEvent($session->id, 'DUPLICATE_ANSWER_ATTEMPT', 'candidate', $candidateId, ['question_id' => $questionId]);
+                    $this->logEvent(
+                        $session->id, 'DUPLICATE_ANSWER_ATTEMPT', 'candidate', $candidateId,
+                        ['question_id' => $questionId], $candidateId
+                    );
                     throw new \Exception('Domanda già risposta');
                 }
                 throw $e;
@@ -479,7 +580,8 @@ class ExamEngineService
                     'is_correct'           => $isCorrect,
                     'time_spent_seconds'   => $timeSpentSeconds,
                     'id_exam_session_step' => $run->current_step,
-                ], $requestMeta)
+                ], $requestMeta),
+                $candidateId
             );
 
             return $saved;
@@ -533,9 +635,12 @@ class ExamEngineService
             ->where('id_candidate', $candidateId)
             ->firstOrFail();
 
+        // Filtro su id_candidate (colonna dedicata) invece di actor_id: actor_id
+        // rappresenta "chi ha generato il log" (può essere l'esaminatore), mentre
+        // id_candidate rappresenta sempre "a quale candidato appartiene il log".
         $events = ExamSessionLog::where('id_exam_session', $session->id)
             ->where(function ($q) use ($candidateId) {
-                $q->where('actor_id', $candidateId)->orWhereNull('actor_id');
+                $q->where('id_candidate', $candidateId)->orWhereNull('id_candidate');
             })
             ->orderBy('id')
             ->get()
@@ -547,6 +652,7 @@ class ExamEngineService
                 }
 
                 return [
+                    'id'         => $log->id,
                     'event_type' => $log->event_type,
                     'actor_type' => $log->actor_type,
                     'actor_id'   => $log->actor_id,
@@ -616,7 +722,8 @@ class ExamEngineService
             'REPORT_GENERATED',
             'system',
             $candidateId,
-            $this->withMeta(['report' => $report], $requestMeta)
+            $this->withMeta(['report' => $report], $requestMeta),
+            $candidateId
         );
 
         return ['areas' => $report];
@@ -659,7 +766,8 @@ class ExamEngineService
                 $this->withMeta([
                     'candidates_by_status' => $statusCounts,
                     'total_candidates'     => $statusCounts->sum(),
-                ], $requestMeta)
+                ], $requestMeta),
+                null
             );
 
             // Notifica tutti i candidati ancora connessi
@@ -816,7 +924,7 @@ class ExamEngineService
                 'started_at'            => $startedAt->toIso8601String(),
                 'timed_out_at'          => now()->toIso8601String(),
                 'elapsed_seconds'       => $startedAt->diffInSeconds(now()),
-            ]);
+            ], $run->id_candidate);
 
             $this->broadcastRunsUpdate($session);
 
@@ -895,7 +1003,8 @@ class ExamEngineService
                 'passing_score_required' => $finishedRule->passing_score ?? null,
                 'level_duration_minutes' => $finishedRule->duration_minutes ?? null,
                 'duration_used_seconds'  => $durationUsedSeconds,
-            ]
+            ],
+            $run->id_candidate
         );
 
         $next = $this->resolveNextGroup($session->id_exam, $run->current_exam_area_id, $run->current_exam_level_id, $result['passed']);
@@ -914,7 +1023,7 @@ class ExamEngineService
                 'started_at'              => $run->started_at ? Carbon::parse($run->started_at)->toIso8601String() : null,
                 'ended_at'                => now()->toIso8601String(),
                 'total_duration_seconds'  => $totalDurationSeconds,
-            ]);
+            ], $run->id_candidate);
 
             $this->broadcastRunsUpdate($session);
 
@@ -933,7 +1042,8 @@ class ExamEngineService
             'LEVEL_STARTED',
             'system',
             $run->id_candidate,
-            $this->buildLevelStartedPayload($next['area'], $next['level'])
+            $this->buildLevelStartedPayload($next['area'], $next['level']),
+            $run->id_candidate
         );
 
         return $result;
@@ -960,13 +1070,13 @@ class ExamEngineService
             $this->logEvent($sessionId, 'BROADCAST_SENT', 'websocket', null, [
                 'event'   => $eventName,
                 'channel' => $channel,
-            ]);
+            ], null);
         } catch (\Throwable $e) {
             $this->logEvent($sessionId, 'BROADCAST_FAILED', 'websocket', null, [
                 'event'   => $eventName,
                 'channel' => $channel,
                 'error'   => $e->getMessage(),
-            ]);
+            ], null);
 
             Log::error('WebSocket broadcast failed', [
                 'event'   => $eventName,
@@ -987,6 +1097,7 @@ class ExamEngineService
             ->get()
             ->map(fn ($run) => [
                 'candidate_public_id' => $run->candidate->public_id,
+                'candidate_id'        => $run->id_candidate,
                 'candidate_name'      => $run->candidate->name . ' ' . $run->candidate->surname,
                 'status'              => $run->status,
             ])
@@ -1000,6 +1111,47 @@ class ExamEngineService
         );
     }
 
+    /**
+     * Spinge in tempo reale il singolo log appena creato all'esaminatore
+     * (e a chi altro ascolta il canale della sessione). Non passa da
+     * safeBroadcast per non raddoppiare il volume di exam_session_logs:
+     * qui un eventuale fallimento viene solo loggato su Log::error, senza
+     * generare un'altra riga di audit.
+     */
+    private function broadcastLogCreated(ExamSessionLog $log): void
+    {
+        // Eventi infrastrutturali sul meccanismo di broadcast stesso: restano
+        // salvati per audit ma non vengono spinti in tempo reale (eviterebbero
+        // comunque poco valore per l'esaminatore e rischierebbero cicli).
+        if (in_array($log->event_type, ['BROADCAST_SENT', 'BROADCAST_FAILED'], true)) {
+            return;
+        }
+
+        try {
+            $session = ExamSession::find($log->id_exam_session);
+            if (!$session) return;
+
+            $candidatePublicId = $log->id_candidate
+                ? Candidate::where('id', $log->id_candidate)->value('public_id')
+                : null;
+
+            broadcast(new \App\Events\ExamSessionLogCreated($session->public_id, [
+                'id'                  => $log->id,
+                'event_type'          => $log->event_type,
+                'actor_type'          => $log->actor_type,
+                'actor_id'            => $log->actor_id,
+                'candidate_public_id' => $candidatePublicId,
+                'payload'             => $log->payload,
+                'created_at'          => $log->created_at?->toIso8601String(),
+            ]));
+        } catch (\Throwable $e) {
+            Log::error('WebSocket log broadcast failed', [
+                'log_id' => $log->id,
+                'error'  => $e->getMessage(),
+            ]);
+        }
+    }
+
     // =========================================================
     // SESSION LOGGING
     // =========================================================
@@ -1008,22 +1160,50 @@ class ExamEngineService
         string $eventType,
         string $actorType,
         ?int $actorId = null,
-        ?array $payload = null
+        ?array $payload = null,
+        ?int $candidateId = null
     ): void {
         try {
-            ExamSessionLog::create([
+            $log = ExamSessionLog::create([
                 'id_exam_session' => $sessionId,
                 'event_type'      => $eventType,
                 'actor_type'      => $actorType,
                 'actor_id'        => $actorId,
+                'id_candidate'    => $candidateId,
                 'payload'         => $payload,
             ]);
+
+            $log->refresh();
+
+            $this->broadcastLogCreated($log);
         } catch (\Throwable $e) {
             Log::error('Exam session log error', [
                 'message'    => $e->getMessage(),
                 'session_id' => $sessionId,
             ]);
         }
+    }
+
+    // =========================================================
+    // LOG EVENTO CLIENT (es. stato connessione WebSocket)
+    // =========================================================
+
+    public function logClientEvent(
+        string $sessionPublicId,
+        string $eventType,
+        ?int $candidateId,
+        array $payload = []
+    ): void {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $this->logEvent(
+            $session->id,
+            $eventType,
+            'websocket',
+            $candidateId,
+            $payload,
+            $candidateId
+        );
     }
 
     private function withMeta(array $payload, ?array $requestMeta): array
@@ -1044,47 +1224,5 @@ class ExamEngineService
             'current_level' => null,
             'questions'     => collect(),
         ];
-    }
-
-    public function heartbeat(string $sessionPublicId, int $candidateId): void
-    {
-        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
-
-        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
-            ->where('id_candidate', $candidateId)
-            ->first();
-
-        if (!$run || !in_array($run->status, ['waiting', 'authorized', 'in_progress'])) {
-            return;
-        }
-
-        $run->update(['last_heartbeat_at' => now()]);
-    }
-
-    public function terminateStaleConnections(int $timeoutSeconds = 45): int
-    {
-        $staleRuns = ExamSessionCandidateRun::whereIn('status', ['waiting', 'authorized', 'in_progress'])
-            ->whereNotNull('last_heartbeat_at')
-            ->where('last_heartbeat_at', '<', now()->subSeconds($timeoutSeconds))
-            ->get();
-
-        $count = 0;
-
-        foreach ($staleRuns as $run) {
-            $session = ExamSession::find($run->id_exam_session);
-            if (!$session || $session->status !== 'live') continue;
-
-            $run->update(['status' => 'terminated', 'ended_at' => now()]);
-
-            $this->logEvent(
-                $session->id, 'CANDIDATE_DISCONNECTED', 'system', $run->id_candidate,
-                ['reason' => 'heartbeat_timeout', 'last_heartbeat_at' => $run->last_heartbeat_at?->toIso8601String()]
-            );
-
-            $this->broadcastRunsUpdate($session);
-            $count++;
-        }
-
-        return $count;
     }
 }
