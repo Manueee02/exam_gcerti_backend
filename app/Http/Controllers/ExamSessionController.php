@@ -435,6 +435,7 @@ class ExamSessionController extends Controller
         $request->validate([
             'event'   => ['required', 'string'],
             'channel' => ['required', 'string'],
+            'meta'    => ['sometimes', 'array'],
         ]);
 
         $this->engine->logClientEvent(
@@ -446,6 +447,7 @@ class ExamSessionController extends Controller
                 'ip'         => $request->ip(),
                 'user_agent' => $request->userAgent(),
                 'logged_at'  => now()->toIso8601String(),
+                'client_meta' => $request->input('meta', []),
             ]
         );
 
