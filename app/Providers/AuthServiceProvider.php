@@ -12,6 +12,7 @@ use App\Policies\CandidatePolicy;
 use App\Policies\ExamPolicy;
 use App\Policies\ExamSessionPolicy;
 use App\Policies\PlannedExamInscriptionPolicy;
+use App\Policies\PlannedExamPolicy;
 use App\Policies\QuestionPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
 
@@ -26,7 +27,7 @@ class AuthServiceProvider extends ServiceProvider
         Question::class => QuestionPolicy::class,
         Exam::class => ExamPolicy::class,
         ExamSession::class => ExamSessionPolicy::class,
-        PlannedExam::class => ExamSessionPolicy::class,
+        PlannedExam::class => PlannedExamPolicy::class,
     ];
 
     /**

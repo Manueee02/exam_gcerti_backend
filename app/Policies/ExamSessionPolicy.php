@@ -2,149 +2,65 @@
 
 namespace App\Policies;
 
-use App\Models\AuditorCache;
 use App\Models\ExamSession;
+use App\Models\ExamSessionCandidateRun;
 use App\Models\PlannedExam;
 use App\Models\User;
-use App\Models\UserCreatedExaminerDecisionmaker;
+use App\Policies\Concerns\ResolvesExaminerAssignment;
 
 class ExamSessionPolicy
 {
-    /**
-     * Risolve l'id numerico App1 dell'auditor associato a un utente locale.
-     * Usa auditors_cache come fonte di verità locale, evitando qualsiasi
-     * chiamata HTTP verso App1 a runtime.
-     * Restituisce null se l'utente non ha un auditor associato o se
-     * l'auditor non è presente in cache.
-     */
-    private function resolveAuditorId(User $user): ?int
-    {
-        $link = UserCreatedExaminerDecisionmaker::where('id_user', $user->id)->first();
+    use ResolvesExaminerAssignment;
 
-        if (!$link) {
-            return null;
-        }
-
-        $auditor = AuditorCache::where('public_id', $link->auditor_public_id)->first();
-
-        return $auditor?->id;
-    }
-
-    /**
-     * Examiner può avviare sessione
-     */
-    public function start(User $user, PlannedExam $plannedExam): bool
-    {
-        $user->loadMissing('role');
-
-        if (in_array($user->role->name, ['admin', 'superAdmin'])) {
-            return true;
-        }
-
-        if ($user->role->name === 'examiner') {
-            $auditorId = $this->resolveAuditorId($user);
-            return $auditorId !== null && $plannedExam->id_examiner === $auditorId;
-        }
-
-        return false;
-    }
-
-    /**
-     * Examiner può chiudere sessione
-     */
     public function end(User $user, ExamSession $session): bool
     {
-        $user->loadMissing('role');
-
-        if (in_array($user->role->name, ['admin', 'superAdmin'])) {
-            return true;
-        }
-
-        if ($user->role->name === 'examiner') {
-            $auditorId = $this->resolveAuditorId($user);
-            return $auditorId !== null && $session->plannedExam->id_examiner === $auditorId;
-        }
-
-        return false;
+        return $this->isStaffForSession($user, $session);
     }
 
-    /**
-     * Examiner abilita candidato
-     */
     public function enableCandidate(User $user, ExamSession $session): bool
     {
-        $user->loadMissing('role');
-
-        if (in_array($user->role->name, ['admin', 'superAdmin'])) {
-            return true;
-        }
-
-        if ($user->role->name === 'examiner') {
-            $auditorId = $this->resolveAuditorId($user);
-            return $auditorId !== null && $session->plannedExam->id_examiner === $auditorId;
-        }
-
-        return false;
+        return $this->isStaffForSession($user, $session);
     }
 
-    /**
-     * Admin/examiner può vedere il log completo di un candidato
-     */
     public function viewCandidateLog(User $user, ExamSession $session): bool
     {
-        $user->loadMissing('role');
+        return $this->isStaffForSession($user, $session);
+    }
 
-        if (in_array($user->role->name, ['admin', 'superAdmin'])) {
+    private function isStaffForSession(User $user, ExamSession $session): bool
+    {
+        if ($this->isAdminOrSuperAdmin($user)) {
             return true;
         }
 
-        if ($user->role->name === 'examiner') {
-            $auditorId = $this->resolveAuditorId($user);
-            return $auditorId !== null && $session->plannedExam->id_examiner === $auditorId;
+        if (!$this->isExaminerRole($user)) {
+            return false;
         }
 
-        return false;
+        $plannedExam = PlannedExam::find($session->id_planned_exam);
+
+        return $plannedExam && $this->userIsAssignedExaminer($user, $plannedExam->id_examiner);
     }
 
-    /**
-     * Candidato può entrare nella sessione
-     */
+    // ── Lato candidato: invariato rispetto a prima ──────────────────────
     public function accessCandidateExam(User $user, ExamSession $session): bool
     {
-        $user->loadMissing('role');
-
-        if ($user->role->name !== 'user') {
-            return false;
-        }
-
-        if (!$user->candidate) {
-            return false;
-        }
-
-        return $session
-            ->candidateRuns()
-            ->where('id_candidate', $user->candidate->id)
-            ->exists();
+        return $this->ownRun($user, $session) !== null;
     }
 
-    /**
-     * Candidato può rispondere
-     */
     public function submitAnswer(User $user, ExamSession $session): bool
     {
-        $user->loadMissing('role');
+        $run = $this->ownRun($user, $session);
+        return $run !== null && $run->status === 'in_progress';
+    }
 
-        if ($user->role->name !== 'user') {
-            return false;
-        }
+    private function ownRun(User $user, ExamSession $session): ?ExamSessionCandidateRun
+    {
+        $candidate = $user->candidate;
+        if (!$candidate) return null;
 
-        if (!$user->candidate) {
-            return false;
-        }
-
-        return $session
-            ->candidateRuns()
-            ->where('id_candidate', $user->candidate->id)
-            ->exists();
+        return ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidate->id)
+            ->first();
     }
 }

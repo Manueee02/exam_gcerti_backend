@@ -9,6 +9,8 @@ class AuditorCache extends Model
     protected $table = 'auditors_cache';
     public $incrementing = true;
     protected $keyType = 'int';
+    public $timestamps = true;
+
 
     protected $fillable = [
         'id', 'public_id', 'name', 'surname', 'phone', 'email', 'fiscal_code',

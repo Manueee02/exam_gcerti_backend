@@ -36,6 +36,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.active.token' => \App\Http\Middleware\CheckActiveToken::class,
             'role' => \App\Http\Middleware\CheckRole::class,
             'internal.sync.auth' => \App\Http\Middleware\InternalSyncAuth::class,
+            'candidate.owns.session' => \App\Http\Middleware\EnsureCandidateOwnsExamSession::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

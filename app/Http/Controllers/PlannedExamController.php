@@ -167,15 +167,6 @@ class PlannedExamController extends Controller
                     $isAuthorizedForThisExam = ($plannedExam->id_decision_maker == $auditor->id);
                 }
 
-                Log::info('[PlannedExamController@show] Verifica autorizzazione examiner/DM', [
-                    'user_id'            => $user->id,
-                    'user_role'          => $userRole,
-                    'auditor_id'         => $auditor->id,
-                    'auditor_public_id'  => $auditor->public_id,
-                    'id_examiner'        => $plannedExam->id_examiner,
-                    'id_decision_maker'  => $plannedExam->id_decision_maker,
-                    'is_authorized'      => $isAuthorizedForThisExam,
-                ]);
             } else {
                 Log::warning('[PlannedExamController@show] Nessun auditor associato all\'utente', [
                     'user_id'   => $user->id,
@@ -232,14 +223,6 @@ class PlannedExamController extends Controller
             if (!$isAdmin) {
                 unset($data['inscriptions']);
             }
-
-            Log::info('[PlannedExamController@show] Candidati approvati inclusi nella risposta', [
-                'public_id'        => $publicId,
-                'user_role'        => $userRole,
-                'is_admin'         => $isAdmin,
-                'is_authorized'    => $isAuthorizedForThisExam,
-                'candidates_count' => $plannedExam->plannedExamCandidates->count(),
-            ]);
         } else {
             unset($data['candidate_exams']);
             unset($data['inscriptions']);
@@ -540,11 +523,6 @@ class PlannedExamController extends Controller
                 ->where('has_qualified_status', true)
                 ->get(['public_id', 'name', 'surname'])
                 ->values();
-
-            Log::info('[PlannedExamController@referenceData] Examiners OK', [
-                'request_id' => $requestId,
-                'count'      => $examiners->count(),
-            ]);
         } catch (\Exception $e) {
             Log::error('[PlannedExamController@referenceData] Errore nel recupero degli esaminatori', [
                 'request_id' => $requestId,
@@ -560,11 +538,6 @@ class PlannedExamController extends Controller
                 ->where('has_qualified_status', true)
                 ->get(['public_id', 'name', 'surname'])
                 ->values();
-
-            Log::info('[PlannedExamController@referenceData] DecisionMakers OK', [
-                'request_id' => $requestId,
-                'count'      => $decisionMakers->count(),
-            ]);
         } catch (\Exception $e) {
             Log::error('[PlannedExamController@referenceData] Errore nel recupero dei decision makers', [
                 'request_id' => $requestId,

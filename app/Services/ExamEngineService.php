@@ -1225,4 +1225,246 @@ class ExamEngineService
             'questions'     => collect(),
         ];
     }
+
+    // =========================================================
+// EXAM PROGRESS (per lo stepper/panoramica frontend)
+// =========================================================
+    public function getExamProgress(string $sessionPublicId, int $candidateId): array
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->firstOrFail();
+
+        $areas = $this->getOrderedAreasWithRules($session->id_exam);
+
+        $isCompleted = in_array($run->status, ['completed', 'timeout', 'terminated']);
+
+        $currentAreaId  = $run->current_exam_area_id;
+        $currentLevelId = $run->current_exam_level_id;
+
+        $currentAreaOrder = $currentAreaId
+            ? $areas->firstWhere('id', $currentAreaId)?->order
+            : null;
+
+        $currentLevel = $currentLevelId ? ExamLevel::find($currentLevelId) : null;
+
+        $progress = $areas->map(function ($area) use (
+            $session, $candidateId, $currentAreaId, $currentLevelId,
+            $currentAreaOrder, $currentLevel, $isCompleted
+        ) {
+            $levels = $this->getOrderedLevelsForArea($area->id);
+            $highestPassedOrder = null;
+
+            $levelsProgress = $levels->map(function ($level) use (
+                $session, $candidateId, $area, $currentAreaId, $currentLevelId,
+                $currentAreaOrder, $currentLevel, $isCompleted, &$highestPassedOrder
+            ) {
+                $result    = $this->computeGroupResult($session->id, $candidateId, $area->id, $level->id);
+                $attempted = $result['total'] > 0;
+
+                $isCurrent = !$isCompleted
+                    && $area->id === $currentAreaId
+                    && $level->id === $currentLevelId;
+
+                if ($isCurrent) {
+                    $status = 'current';
+                } elseif ($attempted) {
+                    $status = $result['passed'] ? 'passed' : 'failed_or_skipped';
+                    if ($result['passed']) {
+                        $highestPassedOrder = $level->order;
+                    }
+                } elseif ($isCompleted) {
+                    // esame concluso, questo livello non è mai stato raggiunto
+                    $status = 'failed_or_skipped';
+                } elseif ($currentAreaOrder !== null && $area->order < $currentAreaOrder) {
+                    // area già lasciata alle spalle, livello mai affrontato al suo interno
+                    $status = 'failed_or_skipped';
+                } elseif ($area->id === $currentAreaId && $currentLevel) {
+                    // stessa area del punto corrente: prima o dopo il livello attuale?
+                    $status = $level->order < $currentLevel->order ? 'failed_or_skipped' : 'locked';
+                } else {
+                    $status = 'locked';
+                }
+
+                return [
+                    'exam_level_id' => $level->id,
+                    'name'          => $level->name,
+                    'label'         => $level->label,
+                    'order'         => $level->order,
+                    'status'        => $status,
+                    'correct'       => $attempted ? $result['correct'] : null,
+                    'total'         => $attempted ? $result['total'] : null,
+                    'passing_score' => $result['passing_score'],
+                ];
+            })->values();
+
+            $areaStatus = $levelsProgress->contains(fn ($l) => $l['status'] === 'current')
+                ? 'current'
+                : ($levelsProgress->every(fn ($l) => $l['status'] === 'locked') ? 'locked' : 'done');
+
+            $highestPassedLevel = $highestPassedOrder !== null
+                ? $levels->firstWhere('order', $highestPassedOrder)
+                : null;
+
+            return [
+                'exam_area_id'  => $area->id,
+                'name'          => $area->name,
+                'label'         => $area->label,
+                'order'         => $area->order,
+                'status'        => $areaStatus,
+                'highest_level_passed' => $highestPassedLevel ? [
+                    'exam_level_id' => $highestPassedLevel->id,
+                    'name'          => $highestPassedLevel->name,
+                    'label'         => $highestPassedLevel->label,
+                ] : null,
+                'levels' => $levelsProgress,
+            ];
+        })->values();
+
+        return [
+            'run_status'        => $run->status,
+            'exam_completed'    => $isCompleted,
+            'current_area_id'   => $currentAreaId,
+            'current_level_id'  => $currentLevelId,
+            'areas'             => $progress,
+        ];
+    }
+
+    // =========================================================
+// CONFERMA AVVIO LIVELLO (timer parte al click, non alla transizione)
+// =========================================================
+    public function confirmLevelStart(string $sessionPublicId, int $candidateId): array
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->firstOrFail();
+
+        if ($run->status !== 'in_progress' || !$run->current_exam_area_id || !$run->current_exam_level_id) {
+            throw new \Exception('Nessun livello corrente da avviare');
+        }
+
+        // Se ha già risposto a qualcosa in questo gruppo, il livello è di
+        // fatto già iniziato: non permettiamo di resettare il timer per
+        // estenderlo (es. rientro da un reload a metà livello).
+        $alreadyAnswered = ExamSessionAnswer::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->whereIn('id_question', function ($q) use ($run) {
+                $q->select('id')->from('questions')
+                    ->where('exam_area_id', $run->current_exam_area_id)
+                    ->where('exam_level_id', $run->current_exam_level_id);
+            })
+            ->exists();
+
+        if (!$alreadyAnswered) {
+            $run->update(['current_step_started_at' => now()]);
+
+            $this->logEvent($session->id, 'LEVEL_TIMER_STARTED', 'candidate', $candidateId, [
+                'exam_area_id'  => $run->current_exam_area_id,
+                'exam_level_id' => $run->current_exam_level_id,
+                'started_at'    => now()->toIso8601String(),
+            ], $candidateId);
+        }
+
+        $rule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
+            ->where('exam_level_id', $run->current_exam_level_id)
+            ->first();
+
+        return [
+            'level_ends_at' => $rule
+                ? Carbon::parse($run->current_step_started_at)->addMinutes($rule->duration_minutes)
+                : null,
+        ];
+    }
+
+    // =========================================================
+// SUBMIT LEVEL (batch) — invio esplicito di tutto il livello,
+// con finalizzazione forzata indipendente dal conteggio risposte
+// =========================================================
+    public function submitLevelAnswers(
+        string $sessionPublicId,
+        int $candidateId,
+        array $answers,
+        ?array $requestMeta = null
+    ): array {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        if ($session->status !== 'live') {
+            throw new \Exception('La sessione è chiusa');
+        }
+
+        $run = ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->firstOrFail();
+
+        if ($run->status !== 'in_progress') {
+            throw new \Exception('Esame non attivo per il candidato');
+        }
+
+        $this->ensureGlobalTimeNotExpired($session, $run);
+        $run = $this->ensureCurrentGroupIsValid($run, $session);
+
+        if ($run->status === 'completed') {
+            throw new \Exception('Esame concluso, non sono ammesse altre risposte');
+        }
+
+        $areaId  = $run->current_exam_area_id;
+        $levelId = $run->current_exam_level_id;
+
+        foreach ($answers as $item) {
+            $question = Question::where('public_id', $item['question_id'])->first();
+
+            if (!$question || (int) $question->exam_area_id !== (int) $areaId || (int) $question->exam_level_id !== (int) $levelId) {
+                $this->logEvent($session->id, 'UNAUTHORIZED_QUESTION_ACCESS', 'candidate', $candidateId,
+                    ['question_id' => $item['question_id']], $candidateId);
+                continue; // una domanda malformata non deve bloccare l'intero invio
+            }
+
+            $assignedQuestion = ExamSessionCandidateQuestion::where('id_question', $question->id)
+                ->where('id_candidate_run', $run->id)->exists();
+            if (!$assignedQuestion) continue;
+
+            $alreadyAnswered = ExamSessionAnswer::where('id_exam_session', $session->id)
+                ->where('id_candidate', $candidateId)
+                ->where('id_question', $question->id)->exists();
+            if ($alreadyAnswered) continue;
+
+            $selectedAnswer = Answer::where('public_id', $item['answer_id'])
+                ->where('id_question', $question->id)->first();
+            if (!$selectedAnswer) continue;
+
+            $correctAnswer = Answer::where('id_question', $question->id)->where('is_correct', 'true')->first();
+            $isCorrect = $correctAnswer && (int) $correctAnswer->id === (int) $selectedAnswer->id;
+
+            try {
+                ExamSessionAnswer::create([
+                    'id_exam_session'      => $session->id,
+                    'id_question'          => $question->id,
+                    'id_candidate'         => $candidateId,
+                    'answer'               => ['answer_id' => $selectedAnswer->id],
+                    'is_correct'           => $isCorrect,
+                    'time_spent_seconds'   => $item['time_spent_seconds'] ?? null,
+                    'id_exam_session_step' => $run->current_step,
+                ]);
+            } catch (\Illuminate\Database\QueryException $e) {
+                if ($e->getCode() === '23505') continue; // race su duplicato, ignoro e proseguo
+                throw $e;
+            }
+
+            $this->logEvent($session->id, 'ANSWER_SUBMITTED', 'candidate', $candidateId, $this->withMeta([
+                'question_id'        => $question->id,
+                'is_correct'         => $isCorrect,
+                'time_spent_seconds' => $item['time_spent_seconds'] ?? null,
+            ], $requestMeta), $candidateId);
+        }
+
+        // Finalizzazione esplicita: il candidato ha premuto "Invia livello",
+        // quindi chiudiamo il gruppo indipendentemente da quante domande sono
+        // state effettivamente risposte. Le non risposte restano non conteggiate
+        // come corrette (semplicemente non esiste una riga in exam_session_answers).
+        return $this->finalizeCurrentGroupAndAdvance($run, $session, 'submitted_by_candidate');
+    }
 }

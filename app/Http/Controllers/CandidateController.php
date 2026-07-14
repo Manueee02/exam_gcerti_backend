@@ -449,11 +449,6 @@ class CandidateController extends Controller
 
             DB::commit();
 
-            Log::info('[CandidateController] Candidato creato con successo.', [
-                'user_id'    => $user->id,
-                'public_id'  => $candidate->public_id,
-                'fiscal_code' => $fiscalCode,
-            ]);
 
             return response()->json([
                 'success'   => true,
@@ -556,10 +551,6 @@ class CandidateController extends Controller
 
             DB::commit();
 
-            Log::info('[CandidateController] Candidato aggiornato con successo.', [
-                'public_id' => $id,
-                'user_id'   => auth()->id(),
-            ]);
 
             return response()->json([
                 'success'   => true,
@@ -607,10 +598,6 @@ class CandidateController extends Controller
 
         $candidate->update(['active' => 'false']);
 
-        Log::info('[CandidateController] Candidato disattivato con successo.', [
-            'public_id' => $id,
-            'user_id'   => auth()->id(),
-        ]);
 
         return response()->json([
             'success' => true,

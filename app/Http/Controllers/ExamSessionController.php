@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\SubmitAnswerRequest;
+use App\Http\Requests\SubmitLevelRequest;
 use App\Models\Answer;
 use App\Models\Candidate;
 use App\Models\ExamSession;
@@ -349,7 +350,7 @@ class ExamSessionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Nessuna sessione attiva per questo esame',
-            ], 404);
+            ]);
         }
 
         return response()->json([
@@ -461,6 +462,58 @@ class ExamSessionController extends Controller
         $this->engine->heartbeat($sessionPublicId, $request->user()->candidate->id);
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * =====================================================
+     * EXAM PROGRESS (stepper/panoramica)
+     * =====================================================
+     */
+    public function getProgress(Request $request, string $sessionPublicId)
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+
+        // Stessa regola di accesso di getCandidateExam: deve essere
+        // lui stesso il candidato di questa sessione.
+        $this->authorize('accessCandidateExam', $session);
+
+        $data = $this->engine->getExamProgress(
+            $sessionPublicId,
+            $request->user()->candidate->id
+        );
+
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+        ]);
+    }
+
+    public function startLevel(Request $request, string $sessionPublicId)
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+        $this->authorize('submitAnswer', $session); // stesso vincolo: run in_progress
+
+        $data = $this->engine->confirmLevelStart(
+            $sessionPublicId,
+            $request->user()->candidate->id
+        );
+
+        return response()->json(['success' => true, 'data' => $data]);
+    }
+
+    public function submitLevel(SubmitLevelRequest $request, string $sessionPublicId)
+    {
+        $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
+        $this->authorize('submitAnswer', $session);
+
+        $result = $this->engine->submitLevelAnswers(
+            $sessionPublicId,
+            $request->user()->candidate->id,
+            $request->input('answers', []),
+            $this->requestMeta($request)
+        );
+
+        return response()->json(['success' => true, 'data' => $result]);
     }
 
 

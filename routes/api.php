@@ -270,19 +270,32 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::get('/{sessionPublicId}/runs', [ExamSessionController::class, 'getRuns']);
             Route::post('/{sessionPublicId}/terminate-candidate', [ExamSessionController::class, 'terminateCandidate']);
         });
+    Route::middleware('role:user,examiner,admin,superAdmin')
+        ->get('/exam-sessions/{plannedExamPublicId}/active-session', [ExamSessionController::class, 'getActiveSession']);
     Route::middleware('role:user')
         ->prefix('exam-sessions')
-        ->group(
-            function () {
-                Route::post('/{sessionPublicId}/join', [ExamSessionController::class, 'join']);
-                Route::get('/{plannedExamPublicId}/active-session', [ExamSessionController::class, 'getActiveSession']);
-                Route::get('/{sessionPublicId}/candidate', [ExamSessionController::class, 'getCandidateExam']);
-                Route::post('/{sessionPublicId}/answer', [ExamSessionController::class, 'submitAnswer']);
-                Route::get('/{sessionPublicId}/score', [ExamSessionController::class, 'score']);
-                Route::post('/{sessionPublicId}/log-socket-event', [ExamSessionController::class, 'logSocketEvent']);
-
-            }
-        );
+        ->group(function () {
+            Route::post('/{sessionPublicId}/join', [ExamSessionController::class, 'join'])
+                ->middleware('candidate.owns.session');
+            Route::get('/{sessionPublicId}/candidate', [ExamSessionController::class, 'getCandidateExam'])
+                ->middleware('candidate.owns.session');
+            Route::post('/{sessionPublicId}/answer', [ExamSessionController::class, 'submitAnswer'])
+                ->middleware(['candidate.owns.session', 'throttle:answer-submit']);
+            Route::get('/{sessionPublicId}/score', [ExamSessionController::class, 'score'])
+                ->middleware('candidate.owns.session');
+            Route::post('/{sessionPublicId}/log-socket-event', [ExamSessionController::class, 'logSocketEvent'])
+                ->middleware(['candidate.owns.session', 'throttle:log-events']);
+            Route::post('/{sessionPublicId}/heartbeat', [ExamSessionController::class, 'heartbeat'])
+                ->middleware(['candidate.owns.session', 'throttle:heartbeat']);
+            Route::get('/{sessionPublicId}/my-activity-log', [ExamSessionController::class, 'myActivityLog'])
+                ->middleware('candidate.owns.session');
+            Route::get('/{sessionPublicId}/progress', [ExamSessionController::class, 'getProgress'])
+                ->middleware('candidate.owns.session');
+            Route::post('/{sessionPublicId}/start-level', [ExamSessionController::class, 'startLevel'])
+                ->middleware('candidate.owns.session');
+            Route::post('/{sessionPublicId}/submit-level', [ExamSessionController::class, 'submitLevel'])
+                ->middleware(['candidate.owns.session', 'throttle:answer-submit']);
+        });
 });
 
 
