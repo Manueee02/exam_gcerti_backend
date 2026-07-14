@@ -18,7 +18,8 @@ class ExamSessionCandidateRun extends Model
         'passed',
         'current_exam_area_id',
         'current_exam_level_id',
-        'current_step_started_at'
+        'current_step_started_at',
+        'level_started_by_candidate_at',
     ];
 
     protected $casts = [
@@ -26,7 +27,7 @@ class ExamSessionCandidateRun extends Model
         'ended_at' => 'datetime',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
-
+        'level_started_by_candidate_at' => 'datetime',
     ];
 
     // RELAZIONI

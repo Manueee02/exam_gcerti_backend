@@ -232,6 +232,7 @@ class ExamSessionController extends Controller
      * SCORE
      * =====================================================
      */
+// DOPO
     public function score(
         Request $request,
         string $sessionPublicId
@@ -243,7 +244,7 @@ class ExamSessionController extends Controller
         )->firstOrFail();
 
         $this->authorize(
-            'submitAnswer',
+            'accessCandidateExam',
             $session
         );
 
