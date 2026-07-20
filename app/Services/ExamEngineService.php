@@ -44,6 +44,11 @@ class ExamEngineService
             $allowedStart  = $examDateTime->copy()->subMinutes(10);
 
             if (now()->lt($allowedStart)) {
+                Log::warning('startSession: tentativo di apertura sessione troppo anticipato', [
+                    'planned_exam_public_id' => $plannedExamPublicId,
+                    'allowed_start'          => $allowedStart->toIso8601String(),
+                    'now'                    => now()->toIso8601String(),
+                ]);
                 throw new \Exception('La sessione può essere aperta solo 10 minuti prima dell\'esame');
             }
 
@@ -52,6 +57,9 @@ class ExamEngineService
                 ->exists();
 
             if ($alreadyLive) {
+                Log::warning('startSession: tentativo di apertura di una seconda sessione live', [
+                    'planned_exam_id' => $plannedExam->id,
+                ]);
                 throw new \Exception('Esiste già una sessione attiva');
             }
 
@@ -124,6 +132,10 @@ class ExamEngineService
                 $firstGroup = $this->resolveFirstGroup($plannedExam->id_exam);
 
                 if ($firstGroup === null) {
+                    Log::error('startSession: esame senza regole di estrazione configurate', [
+                        'exam_id'      => $plannedExam->id_exam,
+                        'candidate_id' => $candidate->id_candidate,
+                    ]);
                     throw new \Exception('Esame non configurato: nessuna area/livello con regole di estrazione');
                 }
 
@@ -239,6 +251,11 @@ class ExamEngineService
             ->first();
 
         if (!$run || !in_array($run->status, ['waiting', 'authorized', 'in_progress'])) {
+            Log::warning('heartbeat: ricevuto heartbeat per run assente o in stato non valido', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'run_status'        => $run->status ?? null,
+            ]);
             return;
         }
 
@@ -260,6 +277,11 @@ class ExamEngineService
             ->first();
 
         if (!$run || in_array($run->status, ['completed', 'timeout', 'terminated', 'pending'])) {
+            Log::warning('candidateDisconnected: notifica ignorata, run assente o già in stato finale/pending', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'run_status'        => $run->status ?? null,
+            ]);
             return;
         }
 
@@ -294,6 +316,13 @@ class ExamEngineService
             if (!$session || $session->status !== 'live') continue;
 
             $run->update(['status' => 'terminated', 'ended_at' => now()]);
+
+            Log::warning('terminateStaleConnections: run terminato per timeout heartbeat', [
+                'exam_session_id'   => $session->id,
+                'candidate_id'      => $run->id_candidate,
+                'last_heartbeat_at' => $run->last_heartbeat_at?->toIso8601String(),
+                'timeout_seconds'   => $timeoutSeconds,
+            ]);
 
             $this->logEvent(
                 $session->id,
@@ -330,6 +359,11 @@ class ExamEngineService
             ->firstOrFail();
 
         if (in_array($run->status, ['completed', 'timeout', 'terminated'])) {
+            Log::warning('terminateCandidate: tentativo di terminare un run già in stato finale', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'run_status'        => $run->status,
+            ]);
             return;
         }
 
@@ -364,6 +398,11 @@ class ExamEngineService
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
         if ($session->status !== 'live') {
+            Log::warning('getCandidateExam: accesso a sessione non live', [
+                'session_public_id' => $sessionPublicId,
+                'session_status'    => $session->status,
+                'candidate_id'      => $candidateId,
+            ]);
             throw new \Exception('La sessione non è attiva');
         }
 
@@ -372,6 +411,11 @@ class ExamEngineService
             ->firstOrFail();
 
         if (!in_array($run->status, ['authorized', 'in_progress', 'completed', 'timeout'])) {
+            Log::warning('getCandidateExam: candidato non autorizzato ad accedere', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'run_status'        => $run->status,
+            ]);
             throw new \Exception('Candidato non autorizzato');
         }
 
@@ -422,6 +466,15 @@ class ExamEngineService
             ->orderBy('position')
             ->get();
 
+        if ($questions->isEmpty()) {
+            Log::warning('getCandidateExam: nessuna domanda trovata per il gruppo corrente', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'exam_area_id'      => $run->current_exam_area_id,
+                'exam_level_id'     => $run->current_exam_level_id,
+            ]);
+        }
+
         // Ordine risposte pseudo-casuale ma stabile per (run, domanda)
         $questions->each(function ($cq) use ($run) {
             $cq->question->answers = $cq->question->answers
@@ -436,6 +489,15 @@ class ExamEngineService
         $rule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
             ->where('exam_level_id', $run->current_exam_level_id)
             ->first();
+
+        if (!$rule) {
+            Log::error('getCandidateExam: regola di estrazione mancante per il gruppo corrente', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'exam_area_id'      => $run->current_exam_area_id,
+                'exam_level_id'     => $run->current_exam_level_id,
+            ]);
+        }
 
         return [
             'session'       => $session,
@@ -467,6 +529,11 @@ class ExamEngineService
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
         if ($session->status !== 'live') {
+            Log::warning('submitAnswer: tentativo di risposta su sessione chiusa', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'question_id'       => $questionId,
+            ]);
             throw new \Exception('La sessione è chiusa');
         }
 
@@ -475,6 +542,11 @@ class ExamEngineService
             ->firstOrFail();
 
         if ($run->status !== 'in_progress') {
+            Log::warning('submitAnswer: tentativo di risposta con run non in_progress', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'run_status'        => $run->status,
+            ]);
             throw new \Exception('Esame non attivo per il candidato');
         }
 
@@ -482,6 +554,11 @@ class ExamEngineService
         $run = $this->ensureCurrentGroupIsValid($run, $session);
 
         if ($run->status === 'completed') {
+            Log::warning('submitAnswer: tentativo di risposta dopo finalizzazione del run', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'question_id'       => $questionId,
+            ]);
             throw new \Exception('Esame concluso, non sono ammesse altre risposte');
         }
 
@@ -492,6 +569,11 @@ class ExamEngineService
             (int) $question->exam_area_id !== (int) $run->current_exam_area_id ||
             (int) $question->exam_level_id !== (int) $run->current_exam_level_id
         ) {
+            Log::warning('submitAnswer: accesso non autorizzato a domanda fuori dal livello corrente', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'question_id'       => $questionId,
+            ]);
             $this->logEvent(
                 $session->id,
                 'UNAUTHORIZED_QUESTION_ACCESS',
@@ -508,6 +590,11 @@ class ExamEngineService
             ->exists();
 
         if (!$assignedQuestion) {
+            Log::warning('submitAnswer: accesso non autorizzato a domanda non assegnata', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'question_id'       => $questionId,
+            ]);
             $this->logEvent(
                 $session->id,
                 'UNAUTHORIZED_QUESTION_ACCESS',
@@ -525,6 +612,11 @@ class ExamEngineService
             ->exists();
 
         if ($alreadyAnswered) {
+            Log::warning('submitAnswer: tentativo di risposta duplicata', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'question_id'       => $questionId,
+            ]);
             $this->logEvent(
                 $session->id,
                 'DUPLICATE_ANSWER_ATTEMPT',
@@ -539,6 +631,12 @@ class ExamEngineService
         $correctAnswer = Answer::where('id_question', $questionId)
             ->where('is_correct', 'true')
             ->first();
+
+        if (!$correctAnswer) {
+            Log::error('submitAnswer: nessuna risposta corretta configurata per la domanda', [
+                'question_id' => $questionId,
+            ]);
+        }
 
         $isCorrect = false;
         if ($correctAnswer) {
@@ -561,12 +659,24 @@ class ExamEngineService
                 ]);
             } catch (\Illuminate\Database\QueryException $e) {
                 if ($e->getCode() === '23505') {
+                    Log::warning('submitAnswer: race condition su risposta duplicata intercettata a livello DB', [
+                        'session_id'   => $session->id,
+                        'candidate_id' => $candidateId,
+                        'question_id'  => $questionId,
+                    ]);
                     $this->logEvent(
                         $session->id, 'DUPLICATE_ANSWER_ATTEMPT', 'candidate', $candidateId,
                         ['question_id' => $questionId], $candidateId
                     );
                     throw new \Exception('Domanda già risposta');
                 }
+
+                Log::error('submitAnswer: errore query inatteso durante il salvataggio della risposta', [
+                    'session_id'   => $session->id,
+                    'candidate_id' => $candidateId,
+                    'question_id'  => $questionId,
+                    'error'        => $e->getMessage(),
+                ]);
                 throw $e;
             }
 
@@ -592,6 +702,15 @@ class ExamEngineService
         $rule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
             ->where('exam_level_id', $run->current_exam_level_id)
             ->first();
+
+        if (!$rule) {
+            Log::error('submitAnswer: regola di estrazione mancante, impossibile valutare avanzamento livello', [
+                'session_id'    => $session->id,
+                'candidate_id'  => $candidateId,
+                'exam_area_id'  => $run->current_exam_area_id,
+                'exam_level_id' => $run->current_exam_level_id,
+            ]);
+        }
 
         if ($rule) {
             $answeredInGroup = ExamSessionAnswer::where('id_exam_session', $session->id)
@@ -692,6 +811,15 @@ class ExamEngineService
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
         $areas  = $this->getOrderedAreasWithRules($session->id_exam);
+
+        if ($areas->isEmpty()) {
+            Log::error('calculateScore: nessuna area con regole di estrazione trovata per l\'esame', [
+                'session_public_id' => $sessionPublicId,
+                'exam_id'           => $session->id_exam,
+                'candidate_id'      => $candidateId,
+            ]);
+        }
+
         $report = [];
 
         // DOPO
@@ -756,6 +884,10 @@ class ExamEngineService
             $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
             if ($session->status !== 'live') {
+                Log::warning('endSession: tentativo di chiudere una sessione non attiva', [
+                    'session_public_id' => $sessionPublicId,
+                    'session_status'    => $session->status,
+                ]);
                 throw new \Exception('Sessione non attiva');
             }
 
@@ -806,6 +938,12 @@ class ExamEngineService
             $query->where('exam_id', $examId);
         })->get();
 
+        if ($rules->isEmpty()) {
+            Log::warning('generateQuestionsForExam: nessuna regola di estrazione trovata per l\'esame', [
+                'exam_id' => $examId,
+            ]);
+        }
+
         $questions = collect();
 
         foreach ($rules as $rule) {
@@ -817,6 +955,13 @@ class ExamEngineService
                 ->get();
 
             if ($subset->count() < $rule->n_questions) {
+                Log::error('generateQuestionsForExam: domande insufficienti per area/livello', [
+                    'exam_id'       => $examId,
+                    'exam_area_id'  => $rule->exam_area_id,
+                    'exam_level_id' => $rule->exam_level_id,
+                    'required'      => $rule->n_questions,
+                    'available'     => $subset->count(),
+                ]);
                 throw new \Exception(
                     "Domande insufficienti per area {$rule->exam_area_id} livello {$rule->exam_level_id}"
                 );
@@ -851,10 +996,19 @@ class ExamEngineService
     private function resolveFirstGroup(int $examId): ?array
     {
         $areas = $this->getOrderedAreasWithRules($examId);
-        if ($areas->isEmpty()) return null;
+        if ($areas->isEmpty()) {
+            Log::warning('resolveFirstGroup: nessuna area configurata per l\'esame', ['exam_id' => $examId]);
+            return null;
+        }
 
         $levels = $this->getOrderedLevelsForArea($areas->first()->id);
-        if ($levels->isEmpty()) return null;
+        if ($levels->isEmpty()) {
+            Log::warning('resolveFirstGroup: nessun livello configurato per la prima area', [
+                'exam_id' => $examId,
+                'exam_area_id' => $areas->first()->id,
+            ]);
+            return null;
+        }
 
         return ['area' => $areas->first(), 'level' => $levels->first()];
     }
@@ -884,6 +1038,10 @@ class ExamEngineService
         $levelsInNextArea  = $this->getOrderedLevelsForArea($nextArea->id);
 
         if ($levelsInNextArea->isEmpty()) {
+            Log::error('resolveNextGroup: area successiva senza regole di estrazione configurate', [
+                'exam_id'      => $examId,
+                'next_area_id' => $nextArea->id,
+            ]);
             throw new \Exception("Area {$nextArea->id} non ha regole di estrazione configurate");
         }
 
@@ -895,6 +1053,15 @@ class ExamEngineService
         $rule = ExamExtractionRule::where('exam_area_id', $areaId)
             ->where('exam_level_id', $levelId)
             ->first();
+
+        if (!$rule) {
+            Log::warning('computeGroupResult: regola di estrazione mancante per area/livello', [
+                'session_id'    => $sessionId,
+                'candidate_id'  => $candidateId,
+                'exam_area_id'  => $areaId,
+                'exam_level_id' => $levelId,
+            ]);
+        }
 
         $questionIds = Question::where('exam_area_id', $areaId)
             ->where('exam_level_id', $levelId)
@@ -932,6 +1099,13 @@ class ExamEngineService
         if (now()->gt($endTime)) {
             $run->update(['status' => 'timeout', 'ended_at' => now()]);
 
+            Log::warning('ensureGlobalTimeNotExpired: run terminato per timeout esame globale', [
+                'session_id'    => $session->id,
+                'candidate_id'  => $run->id_candidate,
+                'started_at'    => $startedAt->toIso8601String(),
+                'duration_min'  => $durationMinutes,
+            ]);
+
             $this->logEvent($session->id, 'EXAM_TIMEOUT', 'system', $run->id_candidate, [
                 'exam_area_id'          => $run->current_exam_area_id,
                 'exam_level_id'         => $run->current_exam_level_id,
@@ -967,11 +1141,26 @@ class ExamEngineService
             ->where('exam_level_id', $run->current_exam_level_id)
             ->first();
 
-        if (!$rule) return $run;
+        if (!$rule) {
+            Log::error('ensureCurrentGroupIsValid: regola di estrazione mancante, impossibile valutare la scadenza del livello', [
+                'session_id'    => $session->id,
+                'candidate_id'  => $run->id_candidate,
+                'exam_area_id'  => $run->current_exam_area_id,
+                'exam_level_id' => $run->current_exam_level_id,
+            ]);
+            return $run;
+        }
 
         $levelEndsAt = Carbon::parse($run->level_started_by_candidate_at)->addMinutes($rule->duration_minutes);
 
         if (now()->gt($levelEndsAt)) {
+            Log::warning('ensureCurrentGroupIsValid: livello scaduto, finalizzazione forzata per timeout', [
+                'session_id'    => $session->id,
+                'candidate_id'  => $run->id_candidate,
+                'exam_area_id'  => $run->current_exam_area_id,
+                'exam_level_id' => $run->current_exam_level_id,
+                'level_ends_at' => $levelEndsAt->toIso8601String(),
+            ]);
             $this->finalizeCurrentGroupAndAdvance($run, $session, 'timeout');
             $run->refresh();
         }
@@ -984,6 +1173,13 @@ class ExamEngineService
         $rule = ExamExtractionRule::where('exam_area_id', $area->id)
             ->where('exam_level_id', $level->id)
             ->first();
+
+        if (!$rule) {
+            Log::warning('buildLevelStartedPayload: regola di estrazione mancante per area/livello', [
+                'exam_area_id'  => $area->id,
+                'exam_level_id' => $level->id,
+            ]);
+        }
 
         return [
             'exam_area_id'          => $area->id,
@@ -1105,7 +1301,8 @@ class ExamEngineService
                 'error'   => $e->getMessage(),
             ], null);
 
-            Log::error('WebSocket broadcast failed', [
+            Log::error('safeBroadcast: broadcast WebSocket fallito', [
+                'session_id' => $sessionId,
                 'event'   => $eventName,
                 'channel' => $channel,
                 'error'   => $e->getMessage(),
@@ -1156,7 +1353,13 @@ class ExamEngineService
 
         try {
             $session = ExamSession::find($log->id_exam_session);
-            if (!$session) return;
+            if (!$session) {
+                Log::warning('broadcastLogCreated: sessione non trovata per il log da trasmettere', [
+                    'log_id'          => $log->id,
+                    'id_exam_session' => $log->id_exam_session,
+                ]);
+                return;
+            }
 
             $candidatePublicId = $log->id_candidate
                 ? Candidate::where('id', $log->id_candidate)->value('public_id')
@@ -1172,7 +1375,7 @@ class ExamEngineService
                 'created_at'          => $log->created_at?->toIso8601String(),
             ]));
         } catch (\Throwable $e) {
-            Log::error('WebSocket log broadcast failed', [
+            Log::error('broadcastLogCreated: broadcast del log in tempo reale fallito', [
                 'log_id' => $log->id,
                 'error'  => $e->getMessage(),
             ]);
@@ -1204,9 +1407,10 @@ class ExamEngineService
 
             $this->broadcastLogCreated($log);
         } catch (\Throwable $e) {
-            Log::error('Exam session log error', [
+            Log::error('logEvent: scrittura del log di sessione fallita', [
                 'message'    => $e->getMessage(),
                 'session_id' => $sessionId,
+                'event_type' => $eventType,
             ]);
         }
     }
@@ -1382,6 +1586,11 @@ class ExamEngineService
             ->firstOrFail();
 
         if ($run->status !== 'in_progress' || !$run->current_exam_area_id || !$run->current_exam_level_id) {
+            Log::warning('confirmLevelStart: tentativo di avviare un livello senza run valido in corso', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'run_status'        => $run->status,
+            ]);
             throw new \Exception('Nessun livello corrente da avviare');
         }
 
@@ -1400,6 +1609,15 @@ class ExamEngineService
         $rule = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
             ->where('exam_level_id', $run->current_exam_level_id)
             ->first();
+
+        if (!$rule) {
+            Log::error('confirmLevelStart: regola di estrazione mancante per il livello corrente', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidateId,
+                'exam_area_id'      => $run->current_exam_area_id,
+                'exam_level_id'     => $run->current_exam_level_id,
+            ]);
+        }
 
         return [
             'level_ends_at' => $rule
@@ -1422,6 +1640,10 @@ class ExamEngineService
             $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
             if ($session->status !== 'live') {
+                Log::warning('submitLevelAnswers: tentativo di invio su sessione chiusa', [
+                    'session_public_id' => $sessionPublicId,
+                    'candidate_id'      => $candidateId,
+                ]);
                 throw new \Exception('La sessione è chiusa');
             }
 
@@ -1441,10 +1663,20 @@ class ExamEngineService
             // risponde con successo invece di lanciare un'eccezione che il
             // frontend non può distinguere da un vero fallimento.
             if (in_array($run->status, ['completed', 'timeout', 'terminated'])) {
+                Log::warning('submitLevelAnswers: invio ricevuto dopo finalizzazione già avvenuta (idempotenza)', [
+                    'session_public_id' => $sessionPublicId,
+                    'candidate_id'      => $candidateId,
+                    'run_status'        => $run->status,
+                ]);
                 return ['already_finalized' => true, 'correct' => null, 'total' => null, 'passed' => null];
             }
 
             if ($run->status !== 'in_progress') {
+                Log::warning('submitLevelAnswers: tentativo di invio con run non in_progress', [
+                    'session_public_id' => $sessionPublicId,
+                    'candidate_id'      => $candidateId,
+                    'run_status'        => $run->status,
+                ]);
                 throw new \Exception('Esame non attivo per il candidato');
             }
 
@@ -1452,6 +1684,10 @@ class ExamEngineService
             $run = $this->ensureCurrentGroupIsValid($run, $session);
 
             if ($run->status === 'completed') {
+                Log::warning('submitLevelAnswers: run finalizzato durante la validazione del gruppo corrente', [
+                    'session_public_id' => $sessionPublicId,
+                    'candidate_id'      => $candidateId,
+                ]);
                 return ['already_finalized' => true, 'correct' => null, 'total' => null, 'passed' => null];
             }
 
@@ -1462,6 +1698,11 @@ class ExamEngineService
                 $question = Question::where('public_id', $item['question_id'])->first();
 
                 if (!$question || (int) $question->exam_area_id !== (int) $areaId || (int) $question->exam_level_id !== (int) $levelId) {
+                    Log::warning('submitLevelAnswers: accesso non autorizzato a domanda fuori dal livello corrente', [
+                        'session_public_id' => $sessionPublicId,
+                        'candidate_id'      => $candidateId,
+                        'question_id'       => $item['question_id'] ?? null,
+                    ]);
                     $this->logEvent($session->id, 'UNAUTHORIZED_QUESTION_ACCESS', 'candidate', $candidateId,
                         ['question_id' => $item['question_id']], $candidateId);
                     continue;
@@ -1469,18 +1710,47 @@ class ExamEngineService
 
                 $assignedQuestion = ExamSessionCandidateQuestion::where('id_question', $question->id)
                     ->where('id_candidate_run', $run->id)->exists();
-                if (!$assignedQuestion) continue;
+                if (!$assignedQuestion) {
+                    Log::warning('submitLevelAnswers: domanda non assegnata al run, ignorata', [
+                        'session_public_id' => $sessionPublicId,
+                        'candidate_id'      => $candidateId,
+                        'question_id'       => $question->id,
+                    ]);
+                    continue;
+                }
 
                 $alreadyAnswered = ExamSessionAnswer::where('id_exam_session', $session->id)
                     ->where('id_candidate', $candidateId)
                     ->where('id_question', $question->id)->exists();
-                if ($alreadyAnswered) continue;
+                if ($alreadyAnswered) {
+                    Log::warning('submitLevelAnswers: risposta duplicata ignorata', [
+                        'session_public_id' => $sessionPublicId,
+                        'candidate_id'      => $candidateId,
+                        'question_id'       => $question->id,
+                    ]);
+                    continue;
+                }
 
                 $selectedAnswer = Answer::where('public_id', $item['answer_id'])
                     ->where('id_question', $question->id)->first();
-                if (!$selectedAnswer) continue;
+                if (!$selectedAnswer) {
+                    Log::warning('submitLevelAnswers: risposta selezionata non valida per la domanda', [
+                        'session_public_id' => $sessionPublicId,
+                        'candidate_id'      => $candidateId,
+                        'question_id'       => $question->id,
+                        'answer_public_id'  => $item['answer_id'] ?? null,
+                    ]);
+                    continue;
+                }
 
                 $correctAnswer = Answer::where('id_question', $question->id)->where('is_correct', 'true')->first();
+
+                if (!$correctAnswer) {
+                    Log::error('submitLevelAnswers: nessuna risposta corretta configurata per la domanda', [
+                        'question_id' => $question->id,
+                    ]);
+                }
+
                 $isCorrect = $correctAnswer && (int) $correctAnswer->id === (int) $selectedAnswer->id;
 
                 try {
@@ -1494,7 +1764,21 @@ class ExamEngineService
                         'id_exam_session_step' => $run->current_step,
                     ]);
                 } catch (\Illuminate\Database\QueryException $e) {
-                    if ($e->getCode() === '23505') continue;
+                    if ($e->getCode() === '23505') {
+                        Log::warning('submitLevelAnswers: race condition su risposta duplicata intercettata a livello DB', [
+                            'session_id'   => $session->id,
+                            'candidate_id' => $candidateId,
+                            'question_id'  => $question->id,
+                        ]);
+                        continue;
+                    }
+
+                    Log::error('submitLevelAnswers: errore query inatteso durante il salvataggio della risposta', [
+                        'session_id'   => $session->id,
+                        'candidate_id' => $candidateId,
+                        'question_id'  => $question->id,
+                        'error'        => $e->getMessage(),
+                    ]);
                     throw $e;
                 }
 

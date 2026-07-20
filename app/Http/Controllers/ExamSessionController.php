@@ -13,6 +13,7 @@ use App\Models\Question;
 use App\Services\ExamEngineService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /*
  Request HTTP
@@ -62,10 +63,19 @@ class ExamSessionController extends Controller
             $plannedExam
         );
 
-        $session = $this->engine->startSession(
-            $plannedExamPublicId,
-            $this->requestMeta($request)
-        );
+        try {
+            $session = $this->engine->startSession(
+                $plannedExamPublicId,
+                $this->requestMeta($request)
+            );
+        } catch (\Throwable $e) {
+            Log::warning('ExamSessionController@start: apertura sessione fallita', [
+                'planned_exam_public_id' => $plannedExamPublicId,
+                'user_id'                => $request->user()->id ?? null,
+                'error'                  => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         return response()->json([
             'success' => true,
@@ -93,10 +103,19 @@ class ExamSessionController extends Controller
             $session
         );
 
-        $session = $this->engine->endSession(
-            $sessionPublicId,
-            $this->requestMeta($request)
-        );
+        try {
+            $session = $this->engine->endSession(
+                $sessionPublicId,
+                $this->requestMeta($request)
+            );
+        } catch (\Throwable $e) {
+            Log::warning('ExamSessionController@end: chiusura sessione fallita', [
+                'session_public_id' => $sessionPublicId,
+                'user_id'           => $request->user()->id ?? null,
+                'error'             => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         return response()->json([
             'success' => true,
@@ -136,12 +155,21 @@ class ExamSessionController extends Controller
             $request->candidate_id
         )->firstOrFail();
 
-        $this->engine->enableCandidate(
-            $sessionPublicId,
-            $candidate->id,
-            $request->user()->id,
-            $this->requestMeta($request)
-        );
+        try {
+            $this->engine->enableCandidate(
+                $sessionPublicId,
+                $candidate->id,
+                $request->user()->id,
+                $this->requestMeta($request)
+            );
+        } catch (\Throwable $e) {
+            Log::error('ExamSessionController@enableCandidate: abilitazione candidato fallita', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $candidate->id,
+                'error'             => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         return response()->json([
             'success' => true,
@@ -168,11 +196,20 @@ class ExamSessionController extends Controller
             $session
         );
 
-        $data = $this->engine->getCandidateExam(
-            $sessionPublicId,
-            $request->user()->candidate->id,
-            $this->requestMeta($request)
-        );
+        try {
+            $data = $this->engine->getCandidateExam(
+                $sessionPublicId,
+                $request->user()->candidate->id,
+                $this->requestMeta($request)
+            );
+        } catch (\Throwable $e) {
+            Log::warning('ExamSessionController@getCandidateExam: recupero esame fallito', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $request->user()->candidate->id ?? null,
+                'error'             => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         return response()->json([
             'success' => true,
@@ -212,14 +249,24 @@ class ExamSessionController extends Controller
             ->where('id_question', $question->id)
             ->firstOrFail();
 
-        $answer = $this->engine->submitAnswer(
-            $sessionPublicId,
-            $request->user()->candidate->id,
-            $question->id,
-            ['answer_id' => $selectedAnswer->id],
-            $request->time_spent_seconds,
-            $this->requestMeta($request)
-        );
+        try {
+            $answer = $this->engine->submitAnswer(
+                $sessionPublicId,
+                $request->user()->candidate->id,
+                $question->id,
+                ['answer_id' => $selectedAnswer->id],
+                $request->time_spent_seconds,
+                $this->requestMeta($request)
+            );
+        } catch (\Throwable $e) {
+            Log::warning('ExamSessionController@submitAnswer: invio risposta fallito', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $request->user()->candidate->id ?? null,
+                'question_id'       => $question->id,
+                'error'             => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         return response()->json([
             'success' => true,
@@ -248,11 +295,20 @@ class ExamSessionController extends Controller
             $session
         );
 
-        $score = $this->engine->calculateScore(
-            $sessionPublicId,
-            $request->user()->candidate->id,
-            $this->requestMeta($request)
-        );
+        try {
+            $score = $this->engine->calculateScore(
+                $sessionPublicId,
+                $request->user()->candidate->id,
+                $this->requestMeta($request)
+            );
+        } catch (\Throwable $e) {
+            Log::error('ExamSessionController@score: calcolo punteggio fallito', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $request->user()->candidate->id ?? null,
+                'error'             => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         return response()->json([
             'success' => true,
@@ -348,6 +404,10 @@ class ExamSessionController extends Controller
             ->first();
 
         if (!$session) {
+            Log::warning('ExamSessionController@getActiveSession: nessuna sessione live trovata', [
+                'planned_exam_public_id' => $plannedExamPublicId,
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Nessuna sessione attiva per questo esame',
@@ -420,6 +480,13 @@ class ExamSessionController extends Controller
         $this->authorize('enableCandidate', $session);
 
         $candidate = Candidate::where('public_id', $request->candidate_id)->firstOrFail();
+
+        Log::warning('ExamSessionController@terminateCandidate: terminazione manuale candidato richiesta dall\'esaminatore', [
+            'session_public_id' => $sessionPublicId,
+            'candidate_id'      => $candidate->id,
+            'examiner_id'       => $request->user()->id ?? null,
+            'reason'            => $request->reason,
+        ]);
 
         $this->engine->terminateCandidate(
             $sessionPublicId,
@@ -494,10 +561,19 @@ class ExamSessionController extends Controller
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
         $this->authorize('submitAnswer', $session); // stesso vincolo: run in_progress
 
-        $data = $this->engine->confirmLevelStart(
-            $sessionPublicId,
-            $request->user()->candidate->id
-        );
+        try {
+            $data = $this->engine->confirmLevelStart(
+                $sessionPublicId,
+                $request->user()->candidate->id
+            );
+        } catch (\Throwable $e) {
+            Log::warning('ExamSessionController@startLevel: avvio livello fallito', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $request->user()->candidate->id ?? null,
+                'error'             => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         return response()->json(['success' => true, 'data' => $data]);
     }
@@ -507,12 +583,21 @@ class ExamSessionController extends Controller
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
         $this->authorize('submitAnswer', $session);
 
-        $result = $this->engine->submitLevelAnswers(
-            $sessionPublicId,
-            $request->user()->candidate->id,
-            $request->input('answers', []),
-            $this->requestMeta($request)
-        );
+        try {
+            $result = $this->engine->submitLevelAnswers(
+                $sessionPublicId,
+                $request->user()->candidate->id,
+                $request->input('answers', []),
+                $this->requestMeta($request)
+            );
+        } catch (\Throwable $e) {
+            Log::error('ExamSessionController@submitLevel: invio livello fallito', [
+                'session_public_id' => $sessionPublicId,
+                'candidate_id'      => $request->user()->candidate->id ?? null,
+                'error'             => $e->getMessage(),
+            ]);
+            throw $e;
+        }
 
         return response()->json(['success' => true, 'data' => $result]);
     }
