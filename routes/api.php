@@ -305,6 +305,11 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
             Route::get('/sessions/{sessionPublicId}', [ExamFinishedController::class, 'sessionShow']);
             Route::get('/{publicId}', [ExamFinishedController::class, 'show']);
         });
+    Route::middleware('role:decisionMaker')
+        ->prefix('exam-finished')->group(function () {
+            Route::post('/{publicId}/approve', [ExamFinishedController::class, 'approve']);
+            Route::post('/{publicId}/reject', [ExamFinishedController::class, 'reject']);
+        });
     Route::middleware('role:admin,superAdmin')
         ->prefix('exam-finished')->group(function () {
             Route::get('/admin/sessions', [ExamFinishedController::class, 'adminSessionsList']);
@@ -313,8 +318,8 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
         ->prefix('my-exam-finished')->group(function () {
             Route::get('/', [ExamFinishedController::class, 'myList']);
             Route::get('/{publicId}', [ExamFinishedController::class, 'myShow']);
-
         });
+    Route::get('/exam-finished/{publicId}/export-pdf', [ExamFinishedController::class, 'exportPdf']);
 });
 
 

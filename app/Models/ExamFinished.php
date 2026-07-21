@@ -24,6 +24,12 @@ class ExamFinished extends Model
         'total_duration_seconds',
         'report_snapshot',
         'generated_at',
+        'approval_status',
+        'approved_by',
+        'approved_at',
+        'approval_note'
+
+
     ];
 
     protected $casts = [
@@ -31,10 +37,16 @@ class ExamFinished extends Model
         'started_at'       => 'datetime',
         'ended_at'         => 'datetime',
         'generated_at'     => 'datetime',
+        'approved_at'      => 'datetime',
     ];
 
     public function areas()
     {
         return $this->hasMany(ExamFinishedArea::class, 'id_exam_finished');
+    }
+
+    public function candidate()
+    {
+        return $this->belongsTo(\App\Models\Candidate::class, 'id_candidate');
     }
 }

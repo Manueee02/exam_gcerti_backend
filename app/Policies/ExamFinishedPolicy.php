@@ -63,4 +63,34 @@ class ExamFinishedPolicy
     {
         return $this->isAdminOrSuperAdmin($user);
     }
+
+    /**
+     * Solo il decisionmaker assegnato al planned_exam della sessione può
+     * approvare/rifiutare — nessun override admin/superAdmin, per design
+     * esplicito: la delibera è una responsabilità solo sua.
+     */
+    public function approve(User $user, ExamFinished $examFinished): bool
+    {
+        $session = ExamSession::find($examFinished->id_exam_session);
+        if (!$session) {
+            return false;
+        }
+
+        $plannedExam = \App\Models\PlannedExam::find($session->id_planned_exam);
+        if (!$plannedExam) {
+            return false;
+        }
+
+        return $this->userIsAssignedDecisionMaker($user, $plannedExam->id_decision_maker);
+    }
+
+    /**
+     * Export: chiunque possa vedere l'esame può anche scaricarlo — candidato
+     * proprietario, staff assegnato alla sessione, o admin/superAdmin.
+     * Riusa le due ability già esistenti invece di riscrivere la logica.
+     */
+    public function export(User $user, ExamFinished $examFinished): bool
+    {
+        return $this->viewOwn($user, $examFinished) || $this->view($user, $examFinished);
+    }
 }
