@@ -19,6 +19,11 @@ use App\Models\Question;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use App\Models\ExamFinished;
+use App\Models\ExamFinishedArea;
+use App\Models\ExamFinishedLevel;
+use App\Models\ExamFinishedQuestion;
+use App\Models\ExamFinishedQuestionOption;
 
 class ExamEngineService
 {
@@ -296,6 +301,8 @@ class ExamEngineService
             $candidateId
         );
 
+        $this->maybeGenerateExamFinishedSnapshot($run, $session);
+
         $this->broadcastRunsUpdate($session);
     }
 
@@ -335,6 +342,8 @@ class ExamEngineService
                 ],
                 $run->id_candidate
             );
+
+            $this->maybeGenerateExamFinishedSnapshot($run, $session);
 
             $this->broadcastRunsUpdate($session);
             $count++;
@@ -383,6 +392,8 @@ class ExamEngineService
             ], $requestMeta),
             $candidateId
         );
+
+        $this->maybeGenerateExamFinishedSnapshot($run, $session);
 
         $this->broadcastRunsUpdate($session);
     }
@@ -803,6 +814,12 @@ class ExamEngineService
     // =========================================================
     // CALCULATE SCORE
     // =========================================================
+// =========================================================
+    // CALCULATE SCORE
+    // =========================================================
+// =========================================================
+    // CALCULATE SCORE
+    // =========================================================
     public function calculateScore(
         string $sessionPublicId,
         int $candidateId,
@@ -810,19 +827,59 @@ class ExamEngineService
     ): array {
         $session = ExamSession::where('public_id', $sessionPublicId)->firstOrFail();
 
-        $areas  = $this->getOrderedAreasWithRules($session->id_exam);
+        $report = $this->buildScoreReport($session->id_exam, $session->id, $candidateId);
+
+        $this->logEvent(
+            $session->id,
+            'REPORT_GENERATED',
+            'system',
+            $candidateId,
+            $this->withMeta(['report' => $report], $requestMeta),
+            $candidateId
+        );
+
+        // Lo snapshot potrebbe non esistere ancora se lo score viene
+        // interrogato prima che il run raggiunga uno stato finale (raro,
+        // ma possibile se il frontend chiama /score in un momento sbagliato),
+        // o se la generazione era fallita silenziosamente in passato.
+        $examFinishedPublicId = ExamFinished::where('id_exam_session', $session->id)
+            ->where('id_candidate', $candidateId)
+            ->value('public_id');
+
+        if (!$examFinishedPublicId) {
+            Log::warning('calculateScore: nessuno snapshot exam_finished trovato per il candidato', [
+                'session_id'   => $session->id,
+                'candidate_id' => $candidateId,
+            ]);
+        }
+
+        return [
+            'areas'                    => $report,
+            'exam_finished_public_id'  => $examFinishedPublicId,
+        ];
+    }
+
+    /**
+     * Logica di attestazione condivisa tra calculateScore() (chiamato a
+     * richiesta) e la generazione dello snapshot exam_finished (chiamata
+     * una sola volta alla chiusura del run). Stessa regola in entrambi i
+     * casi: un'area affrontata non può restare "non classificata", viene
+     * attestata al primo livello se nessuno è stato superato.
+     */
+    private function buildScoreReport(int $examId, int $sessionId, int $candidateId): array
+    {
+        $areas  = $this->getOrderedAreasWithRules($examId);
 
         if ($areas->isEmpty()) {
-            Log::error('calculateScore: nessuna area con regole di estrazione trovata per l\'esame', [
-                'session_public_id' => $sessionPublicId,
-                'exam_id'           => $session->id_exam,
-                'candidate_id'      => $candidateId,
+            Log::error('buildScoreReport: nessuna area con regole di estrazione trovata per l\'esame', [
+                'exam_id'      => $examId,
+                'session_id'   => $sessionId,
+                'candidate_id' => $candidateId,
             ]);
         }
 
         $report = [];
 
-        // DOPO
         foreach ($areas as $area) {
             $levels               = $this->getOrderedLevelsForArea($area->id);
             $highestPassed        = null;
@@ -830,7 +887,7 @@ class ExamEngineService
             $firstLevelAttempted  = false;
 
             foreach ($levels as $level) {
-                $result = $this->computeGroupResult($session->id, $candidateId, $area->id, $level->id);
+                $result = $this->computeGroupResult($sessionId, $candidateId, $area->id, $level->id);
 
                 if ($firstLevel && $level->id === $firstLevel->id) {
                     $firstLevelAttempted = $result['total'] > 0;
@@ -840,11 +897,6 @@ class ExamEngineService
                 if ($result['passed']) $highestPassed = $level;
             }
 
-            // Regola di attestazione: non può esistere "non classificato" per
-            // un'area effettivamente affrontata. Se il candidato non ha superato
-            // nessun livello ma ha risposto ad almeno una domanda del primo
-            // livello, viene attestato a quello (baseline). Se l'area non è mai
-            // stata raggiunta, resta null — nessuna attestazione dovuta.
             $certifiedLevel = $highestPassed ?? ($firstLevelAttempted ? $firstLevel : null);
 
             $report[] = [
@@ -860,18 +912,340 @@ class ExamEngineService
             ];
         }
 
-        $this->logEvent(
-            $session->id,
-            'REPORT_GENERATED',
-            'system',
-            $candidateId,
-            $this->withMeta(['report' => $report], $requestMeta),
-            $candidateId
-        );
+        return $report;
+    }
+    // =========================================================
+    // EXAM FINISHED — snapshot immutabile al termine del run
+    // =========================================================
 
-        return ['areas' => $report];
+    /**
+     * Punto d'ingresso unico. Va chiamato subito dopo ogni update che porta
+     * run.status a uno stato finale (completed | timeout | terminated),
+     * da qualsiasi dei sei percorsi che possono chiudere un run. Idempotente:
+     * se lo snapshot esiste già per (session, candidate) non fa nulla — non
+     * deve mai essere rigenerato/sovrascritto.
+     */
+    private function maybeGenerateExamFinishedSnapshot(
+        ExamSessionCandidateRun $run,
+        ExamSession $session
+    ): void {
+        if (!in_array($run->status, ['completed', 'timeout', 'terminated'])) {
+            return;
+        }
+
+        $exists = ExamFinished::where('id_exam_session', $session->id)
+            ->where('id_candidate', $run->id_candidate)
+            ->exists();
+
+        if ($exists) {
+            Log::warning('maybeGenerateExamFinishedSnapshot: snapshot già presente, generazione ignorata', [
+                'session_id'   => $session->id,
+                'candidate_id' => $run->id_candidate,
+            ]);
+            return;
+        }
+
+        // Un eventuale fallimento qui non deve bloccare la chiusura del run:
+        // la logica di business (stato finale, log, broadcast) è già stata
+        // completata da chi ha chiamato questo metodo. Stesso principio di
+        // safeBroadcast: si logga l'errore, non si propaga.
+        try {
+            DB::transaction(function () use ($run, $session) {
+                $this->buildExamFinishedSnapshot($run, $session);
+            });
+        } catch (\Throwable $e) {
+            Log::error('maybeGenerateExamFinishedSnapshot: generazione snapshot fallita', [
+                'session_id'   => $session->id,
+                'candidate_id' => $run->id_candidate,
+                'run_status'   => $run->status,
+                'error'        => $e->getMessage(),
+            ]);
+        }
     }
 
+    private function buildExamFinishedSnapshot(
+        ExamSessionCandidateRun $run,
+        ExamSession $session
+    ): void {
+        $exam = Exam::find($session->id_exam);
+
+        $totalDurationSeconds = $run->started_at
+            ? (int) round(Carbon::parse($run->started_at)->diffInSeconds($run->ended_at ?? now()))
+            : null;
+
+        $reportSnapshot = $this->buildScoreReport($session->id_exam, $session->id, $run->id_candidate);
+
+        $examFinished = ExamFinished::create([
+            'id_exam_session'                => $session->id,
+            'id_exam'                        => $session->id_exam,
+            'id_candidate'                   => $run->id_candidate,
+            'exam_name_snapshot'             => $exam->name ?? null,
+            'exam_duration_minutes_snapshot' => $exam->duration_minutes ?? null,
+            'session_status'                 => $session->status,
+            'run_status'                     => $run->status,
+            'started_at'                     => $run->started_at,
+            'ended_at'                       => $run->ended_at,
+            'total_duration_seconds'         => $totalDurationSeconds,
+            'report_snapshot'                => $reportSnapshot,
+            'generated_at'                   => now(),
+        ]);
+
+        $this->buildAreasSnapshot($examFinished, $run, $session);
+    }
+
+    private function buildAreasSnapshot(
+        ExamFinished $examFinished,
+        ExamSessionCandidateRun $run,
+        ExamSession $session
+    ): void {
+        $areas = $this->getOrderedAreasWithRules($session->id_exam);
+
+        // Percorso dei gruppi conclusi regolarmente, così come già loggati
+        // da finalizeCurrentGroupAndAdvance durante l'esame.
+        $finishedLevelLogs = ExamSessionLog::where('id_exam_session', $session->id)
+            ->where('id_candidate', $run->id_candidate)
+            ->where('event_type', 'LEVEL_FINISHED')
+            ->orderBy('id')
+            ->get();
+
+        if ($finishedLevelLogs->isEmpty()) {
+            Log::warning('buildAreasSnapshot: nessun log LEVEL_FINISHED trovato per il candidato', [
+                'session_id'   => $session->id,
+                'candidate_id' => $run->id_candidate,
+            ]);
+        }
+
+        foreach ($areas as $area) {
+            $levels              = $this->getOrderedLevelsForArea($area->id);
+            $highestPassed       = null;
+            $firstLevel           = $levels->first();
+            $firstLevelAttempted = false;
+            $anyAttempted        = false;
+
+            foreach ($levels as $level) {
+                $result = $this->computeGroupResult($session->id, $run->id_candidate, $area->id, $level->id);
+
+                if ($firstLevel && $level->id === $firstLevel->id) {
+                    $firstLevelAttempted = $result['total'] > 0;
+                }
+                if ($result['total'] > 0) {
+                    $anyAttempted = true;
+                    if ($result['passed']) $highestPassed = $level;
+                }
+            }
+
+            $certifiedLevel = $highestPassed ?? ($firstLevelAttempted ? $firstLevel : null);
+
+            $areaStatus = $highestPassed
+                ? 'passed'
+                : ($anyAttempted ? 'failed_or_skipped' : 'not_reached');
+
+            $certifiedResult = $certifiedLevel
+                ? $this->computeGroupResult($session->id, $run->id_candidate, $area->id, $certifiedLevel->id)
+                : null;
+
+            $finishedArea = ExamFinishedArea::create([
+                'id_exam_finished'               => $examFinished->id,
+                'id_exam_area'                   => $area->id,
+                'area_name_snapshot'             => $area->name,
+                'area_label_snapshot'            => $area->label,
+                'area_order_snapshot'            => $area->order,
+                'area_status'                    => $areaStatus,
+                'id_exam_level_certified'        => $certifiedLevel->id ?? null,
+                'level_certified_name_snapshot'  => $certifiedLevel->name ?? null,
+                'level_certified_label_snapshot' => $certifiedLevel->label ?? null,
+                'level_certified_order_snapshot' => $certifiedLevel->order ?? null,
+                'correct'                        => $certifiedResult['correct'] ?? null,
+                'total'                          => $certifiedResult['total'] ?? null,
+            ]);
+
+            $areaFinishedLogs = $finishedLevelLogs->filter(
+                fn ($log) => (int) ($log->payload['exam_area_id'] ?? 0) === (int) $area->id
+            )->values();
+
+            foreach ($areaFinishedLogs as $log) {
+                $this->createFinishedLevelFromLog($examFinished, $finishedArea, $run, $log);
+            }
+
+            // Il gruppo corrente del run appartiene a quest'area e non è mai
+            // stato finalizzato (run chiuso da un percorso esterno mentre il
+            // candidato era ancora dentro questo livello): lo registro come
+            // tentativo interrotto, per non perdere la foto reale.
+            $currentBelongsToThisArea = (int) $run->current_exam_area_id === (int) $area->id;
+            $alreadyLogged = $areaFinishedLogs->contains(
+                fn ($log) => (int) ($log->payload['exam_level_id'] ?? 0) === (int) $run->current_exam_level_id
+            );
+
+            if ($currentBelongsToThisArea && $run->current_exam_level_id && !$alreadyLogged) {
+                $this->appendIncompleteLevel($examFinished, $finishedArea, $run, $session);
+            }
+        }
+    }
+
+    private function createFinishedLevelFromLog(
+        ExamFinished $examFinished,
+        ExamFinishedArea $finishedArea,
+        ExamSessionCandidateRun $run,
+        ExamSessionLog $log
+    ): void {
+        $payload    = $log->payload ?? [];
+        $levelId    = $payload['exam_level_id'] ?? null;
+        $level      = $levelId ? ExamLevel::find($levelId) : null;
+
+        if (!$level) {
+            Log::warning('createFinishedLevelFromLog: livello del log LEVEL_FINISHED non trovato', [
+                'log_id'        => $log->id,
+                'exam_level_id' => $levelId,
+            ]);
+        }
+
+        $finishedLevel = ExamFinishedLevel::create([
+            'id_exam_finished'                => $examFinished->id,
+            'id_exam_finished_area'           => $finishedArea->id,
+            'id_exam_level'                   => $levelId,
+            'level_name_snapshot'             => $payload['level_name'] ?? $level->name ?? null,
+            'level_order_snapshot'            => $level->order ?? null,
+            'rule_n_questions_snapshot'       => $payload['n_questions_required'] ?? null,
+            'rule_duration_minutes_snapshot'  => $payload['level_duration_minutes'] ?? null,
+            'rule_passing_score_snapshot'     => $payload['passing_score_required'] ?? null,
+            'correct'                         => $payload['correct'] ?? null,
+            'total'                           => $payload['total'] ?? null,
+            'passed'                          => $payload['passed'] ?? null,
+            'reason'                          => $payload['reason'] ?? 'completed',
+            'is_final_incomplete_level'       => false,
+            'duration_used_seconds'           => isset($payload['duration_used_seconds'])
+                ? (int) round($payload['duration_used_seconds'])
+                : null,
+        ]);
+
+        $this->buildQuestionsSnapshot($finishedLevel, $run, (int) $run->current_exam_area_id === (int) $finishedArea->id_exam_area
+            ? (int) $run->current_exam_area_id
+            : (int) $finishedArea->id_exam_area, (int) $levelId);
+    }
+
+    private function appendIncompleteLevel(
+        ExamFinished $examFinished,
+        ExamFinishedArea $finishedArea,
+        ExamSessionCandidateRun $run,
+        ExamSession $session
+    ): void {
+        $level = ExamLevel::find($run->current_exam_level_id);
+        $rule  = ExamExtractionRule::where('exam_area_id', $run->current_exam_area_id)
+            ->where('exam_level_id', $run->current_exam_level_id)
+            ->first();
+
+        if (!$rule) {
+            Log::error('appendIncompleteLevel: regola di estrazione mancante per il livello interrotto', [
+                'session_id'    => $session->id,
+                'candidate_id'  => $run->id_candidate,
+                'exam_area_id'  => $run->current_exam_area_id,
+                'exam_level_id' => $run->current_exam_level_id,
+            ]);
+        }
+
+        $result = $this->computeGroupResult(
+            $session->id, $run->id_candidate, $run->current_exam_area_id, $run->current_exam_level_id
+        );
+
+        $durationUsedSeconds = $run->current_step_started_at
+            ? (int) round(Carbon::parse($run->current_step_started_at)->diffInSeconds($run->ended_at ?? now()))
+            : null;
+
+        $finishedLevel = ExamFinishedLevel::create([
+            'id_exam_finished'                => $examFinished->id,
+            'id_exam_finished_area'           => $finishedArea->id,
+            'id_exam_level'                   => $run->current_exam_level_id,
+            'level_name_snapshot'             => $level->name ?? null,
+            'level_order_snapshot'            => $level->order ?? null,
+            'rule_n_questions_snapshot'       => $rule->n_questions ?? null,
+            'rule_duration_minutes_snapshot'  => $rule->duration_minutes ?? null,
+            'rule_passing_score_snapshot'     => $rule->passing_score ?? null,
+            'correct'                         => $result['total'] > 0 ? $result['correct'] : null,
+            'total'                           => $result['total'],
+            'passed'                          => null, // interrotto, non valutabile
+            'reason'                          => 'terminated_mid_level',
+            'is_final_incomplete_level'       => true,
+            'duration_used_seconds'           => $durationUsedSeconds,
+        ]);
+
+        $this->buildQuestionsSnapshot(
+            $finishedLevel, $run, (int) $run->current_exam_area_id, (int) $run->current_exam_level_id
+        );
+    }
+
+    /**
+     * Specchio di tutte le domande ASSEGNATE al candidato per quel gruppo
+     * (risposte o no), con tutte le opzioni mostrate e quale ha selezionato.
+     * NB: question_text_snapshot / answer_text_snapshot assumono le colonne
+     * `text` su Question/Answer — da verificare contro lo schema reale.finalizeCurrentGroupAndAdvance
+     */
+    private function buildQuestionsSnapshot(
+        ExamFinishedLevel $finishedLevel,
+        ExamSessionCandidateRun $run,
+        int $areaId,
+        int $levelId
+    ): void {
+        $assignedQuestions = ExamSessionCandidateQuestion::with(['question.answers'])
+            ->where('id_candidate_run', $run->id)
+            ->whereHas('question', function ($q) use ($areaId, $levelId) {
+                $q->where('exam_area_id', $areaId)->where('exam_level_id', $levelId);
+            })
+            ->orderBy('position')
+            ->get();
+
+        if ($assignedQuestions->isEmpty()) {
+            Log::warning('buildQuestionsSnapshot: nessuna domanda assegnata trovata per il gruppo', [
+                'id_candidate_run' => $run->id,
+                'exam_area_id'     => $areaId,
+                'exam_level_id'    => $levelId,
+            ]);
+            return;
+        }
+
+        foreach ($assignedQuestions as $cq) {
+            $question = $cq->question;
+
+            if (!$question) {
+                Log::error('buildQuestionsSnapshot: domanda assegnata non trovata (cancellata?)', [
+                    'id_candidate_question' => $cq->id,
+                ]);
+                continue;
+            }
+
+            $candidateAnswer = ExamSessionAnswer::where('id_exam_session', $run->id_exam_session)
+                ->where('id_candidate', $run->id_candidate)
+                ->where('id_question', $question->id)
+                ->first();
+
+            $selectedAnswerId = $candidateAnswer->answer['answer_id'] ?? null;
+
+            $finishedQuestion = ExamFinishedQuestion::create([
+                'id_exam_finished_level'  => $finishedLevel->id,
+                'id_question'             => $question->id,
+                'question_text_snapshot'  => $question->text,
+                'position'                => $cq->position,
+                'was_answered'            => $candidateAnswer !== null,
+            ]);
+
+            if ($question->answers->isEmpty()) {
+                Log::warning('buildQuestionsSnapshot: domanda senza risposte configurate', [
+                    'id_question' => $question->id,
+                ]);
+            }
+
+            foreach ($question->answers as $index => $answer) {
+                ExamFinishedQuestionOption::create([
+                    'id_exam_finished_question'  => $finishedQuestion->id,
+                    'id_answer'                  => $answer->id,
+                    'answer_text_snapshot'       => $answer->text,
+                    'is_correct_snapshot'        => $answer->is_correct === 'true',
+                    'was_selected_by_candidate'  => $selectedAnswerId !== null
+                        && (int) $selectedAnswerId === (int) $answer->id,
+                    'display_order'              => $index + 1,
+                ]);
+            }
+        }
+    }
     // =========================================================
     // END SESSION
     // =========================================================
@@ -896,9 +1270,14 @@ class ExamEngineService
                 'ended_at' => now(),
             ]);
 
-            ExamSessionCandidateRun::where('id_exam_session', $session->id)
+            $runsToClose = ExamSessionCandidateRun::where('id_exam_session', $session->id)
                 ->whereIn('status', ['pending', 'waiting', 'authorized', 'in_progress'])
-                ->update(['status' => 'completed', 'ended_at' => now()]);
+                ->get();
+
+            foreach ($runsToClose as $runToClose) {
+                $runToClose->update(['status' => 'completed', 'ended_at' => now()]);
+                $this->maybeGenerateExamFinishedSnapshot($runToClose, $session);
+            }
 
             $statusCounts = ExamSessionCandidateRun::where('id_exam_session', $session->id)
                 ->selectRaw('status, count(*) as total')
@@ -1115,6 +1494,8 @@ class ExamEngineService
                 'elapsed_seconds'       => $startedAt->diffInSeconds(now()),
             ], $run->id_candidate);
 
+            $this->maybeGenerateExamFinishedSnapshot($run, $session);
+
             $this->broadcastRunsUpdate($session);
 
             throw new \Exception('Tempo esame terminato');
@@ -1246,6 +1627,8 @@ class ExamEngineService
                 'ended_at'                => now()->toIso8601String(),
                 'total_duration_seconds'  => $totalDurationSeconds,
             ], $run->id_candidate);
+
+            $this->maybeGenerateExamFinishedSnapshot($run, $session);
 
             $this->broadcastRunsUpdate($session);
 

@@ -2,6 +2,7 @@
 
 
 use App\Http\Controllers\AuditorSyncController;
+use App\Http\Controllers\ExamFinishedController;
 use App\Http\Controllers\ExaminerCacheController;
 use App\Http\Controllers\ExamSessionController;
 use App\Http\Controllers\CandidateController;
@@ -16,7 +17,7 @@ use App\Http\Controllers\DecisionMakerController;
 use App\Http\Controllers\ExaminerController;
 use App\Http\Controllers\MediaController;
 use App\Http\Controllers\ResendVerificationController;
-use App\Http\Controllers\Server1Controller;
+/*use App\Http\Controllers\Server1Controller;*/
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UtilsController;
 use App\Http\Controllers\GDPRController;
@@ -295,6 +296,24 @@ Route::middleware('auth:api', 'log.activity', 'check.active.token')->group(funct
                 ->middleware('candidate.owns.session');
             Route::post('/{sessionPublicId}/submit-level', [ExamSessionController::class, 'submitLevel'])
                 ->middleware(['candidate.owns.session', 'throttle:answer-submit']);
+        });
+
+    //Exam Finished
+    Route::middleware('role:admin,superAdmin,examiner,decisionMaker')
+        ->prefix('exam-finished')->group(function () {
+            Route::get('/sessions', [ExamFinishedController::class, 'sessionsList']);
+            Route::get('/sessions/{sessionPublicId}', [ExamFinishedController::class, 'sessionShow']);
+            Route::get('/{publicId}', [ExamFinishedController::class, 'show']);
+        });
+    Route::middleware('role:admin,superAdmin')
+        ->prefix('exam-finished')->group(function () {
+            Route::get('/admin/sessions', [ExamFinishedController::class, 'adminSessionsList']);
+        });
+    Route::middleware('role:user')
+        ->prefix('my-exam-finished')->group(function () {
+            Route::get('/', [ExamFinishedController::class, 'myList']);
+            Route::get('/{publicId}', [ExamFinishedController::class, 'myShow']);
+
         });
 });
 
